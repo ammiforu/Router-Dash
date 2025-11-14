@@ -413,6 +413,8 @@
             <button class="tab-btn" onclick="switchTab('logs')">📋 Logs</button>
             <button class="tab-btn" onclick="switchTab('security')">🔐 Security</button>
             <button class="tab-btn" onclick="switchTab('network')">🌐 Network Intel</button>
+            <button class="tab-btn" onclick="switchTab('smart')">✨ Smart</button>
+            <button class="tab-btn" onclick="switchTab('terminal')">💻 Terminal</button>
             <button class="tab-btn" onclick="switchTab('analytics')">📈 Analytics</button>
         </div>
 
@@ -710,6 +712,61 @@
             </div>
         </div>
 
+        <!-- Smart Features Tab (Module 7) -->
+        <div id="smart" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h3>📍 Device Tags</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                        <input type="text" id="tagMac" placeholder="MAC Address" style="flex: 1; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
+                        <input type="text" id="tagName" placeholder="Device Name" style="flex: 1; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
+                        <button class="diagnostic-btn" onclick="addDeviceTag()" style="padding: 10px 20px;">Tag Device</button>
+                    </div>
+                    <div id="deviceTagsList" style="max-height: 300px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="card">
+                    <h3>📊 Bandwidth Quotas</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-direction: column;">
+                        <input type="text" id="quotaMac" placeholder="MAC Address" style="padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
+                        <input type="number" id="quotaDaily" placeholder="Daily Limit (MB)" value="1000" style="padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
+                        <input type="number" id="quotaMonthly" placeholder="Monthly Limit (GB)" value="30" style="padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
+                        <button class="diagnostic-btn" onclick="setDeviceQuota()" style="padding: 10px 20px;">Set Quota</button>
+                    </div>
+                    <div id="quotasList" style="max-height: 250px; overflow-y: auto;"></div>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>🔔 Automated Alerts</h3>
+                    <button class="diagnostic-btn" onclick="refreshAutoAlerts()" style="width: 100%; margin-bottom: 15px;">Refresh Alerts</button>
+                    <div id="autoAlertsList" style="max-height: 300px; overflow-y: auto;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Terminal Commander Tab (Module 8) -->
+        <div id="terminal" class="tab-content">
+            <div class="grid" style="grid-template-columns: 1fr;">
+                <div class="card">
+                    <h3>💻 Router Terminal</h3>
+                    <p style="color: #888; font-size: 12px; margin-bottom: 15px;">Allowed commands: ping, tracert, traceroute, ipconfig, ifconfig, arp</p>
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <input type="text" id="terminalCommand" placeholder="Enter command (e.g., ping 8.8.8.8)" style="flex: 1; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white; font-family: monospace;">
+                        <button class="diagnostic-btn" onclick="executeTerminalCommand()" style="padding: 10px 20px;">Execute</button>
+                    </div>
+                    <div class="diagnostic-output" id="terminalOutput" style="display: block; min-height: 300px; max-height: 400px;"></div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <h3>📜 Command History</h3>
+                    <button class="diagnostic-btn" onclick="refreshCommandHistory()" style="width: 100%; margin-bottom: 15px;">Refresh</button>
+                    <div id="commandHistoryList" style="max-height: 350px; overflow-y: auto;"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Analytics Tab -->
         <div id="analytics" class="tab-content">
             <div class="grid">
@@ -796,6 +853,12 @@
                 initializeCharts();
             } else if (tabName === 'network') {
                 refreshSpeedTestHistory();
+            } else if (tabName === 'smart') {
+                refreshDeviceTags();
+                refreshBandwidthQuotas();
+                refreshAutoAlerts();
+            } else if (tabName === 'terminal') {
+                refreshCommandHistory();
             } else if (tabName === 'analytics') {
                 initializeTrafficChart();
                 initializePerformanceTrendChart();
@@ -1184,6 +1247,188 @@
             });
         }
 
+        // Smart Features Functions (Module 7)
+        async function addDeviceTag() {
+            try {
+                const mac = document.getElementById('tagMac').value;
+                const name = document.getElementById('tagName').value;
+                
+                if (!mac || !name) {
+                    alert('Please enter MAC address and device name');
+                    return;
+                }
+                
+                const response = await fetch('/api/device-tag', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mac_address: mac, device_name: name })
+                });
+                
+                document.getElementById('tagMac').value = '';
+                document.getElementById('tagName').value = '';
+                refreshDeviceTags();
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function refreshDeviceTags() {
+            try {
+                const response = await fetch('/api/device-tags');
+                const data = await response.json();
+                
+                let html = '';
+                if (data.tags.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No tagged devices</p>';
+                } else {
+                    data.tags.forEach(tag => {
+                        html += `
+                            <div class="device-item">
+                                <div><strong>${tag.device_name}</strong> (${tag.device_type || 'unknown'})</div>
+                                <div style="color: #888; font-size: 11px;">${tag.mac_address}</div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('deviceTagsList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function setDeviceQuota() {
+            try {
+                const mac = document.getElementById('quotaMac').value;
+                const daily = document.getElementById('quotaDaily').value;
+                const monthly = document.getElementById('quotaMonthly').value;
+                
+                if (!mac || !daily || !monthly) {
+                    alert('Please fill all fields');
+                    return;
+                }
+                
+                const response = await fetch('/api/bandwidth-quota', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mac_address: mac,
+                        daily_limit_mb: parseInt(daily),
+                        monthly_limit_gb: parseInt(monthly)
+                    })
+                });
+                
+                document.getElementById('quotaMac').value = '';
+                refreshBandwidthQuotas();
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function refreshBandwidthQuotas() {
+            try {
+                const response = await fetch('/api/bandwidth-quotas');
+                const data = await response.json();
+                
+                let html = '';
+                if (data.quotas.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No quotas set</p>';
+                } else {
+                    data.quotas.forEach(quota => {
+                        html += `
+                            <div class="device-item">
+                                <div>${quota.mac_address}</div>
+                                <div style="color: var(--neon-green); font-size: 12px;">Daily: ${quota.daily_limit_mb}MB | Monthly: ${quota.monthly_limit_gb}GB</div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('quotasList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function refreshAutoAlerts() {
+            try {
+                const response = await fetch('/api/auto-alerts');
+                const data = await response.json();
+                
+                let html = '';
+                if (data.alerts.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No alerts configured</p>';
+                } else {
+                    data.alerts.forEach(alert => {
+                        html += `
+                            <div class="device-item">
+                                <div>${alert.alert_type.toUpperCase()}</div>
+                                <div style="color: #a0a0a0; font-size: 12px;">Threshold: ${alert.threshold} | ${alert.enabled ? '✓ Enabled' : '✗ Disabled'}</div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('autoAlertsList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // Terminal Commander Functions (Module 8)
+        async function executeTerminalCommand() {
+            try {
+                const command = document.getElementById('terminalCommand').value;
+                const output = document.getElementById('terminalOutput');
+                
+                if (!command) {
+                    alert('Please enter a command');
+                    return;
+                }
+                
+                output.textContent = 'Executing...';
+                
+                const response = await fetch('/api/command-execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command })
+                });
+                const data = await response.json();
+                
+                let text = `$ ${command}\n`;
+                text += `${data.output || ''}\n`;
+                if (data.error) text += `Error: ${data.error}\n`;
+                text += `Exit Code: ${data.exit_code}`;
+                
+                output.textContent = text;
+                document.getElementById('terminalCommand').value = '';
+                refreshCommandHistory();
+            } catch (error) {
+                document.getElementById('terminalOutput').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function refreshCommandHistory() {
+            try {
+                const response = await fetch('/api/command-history?limit=30');
+                const data = await response.json();
+                
+                let html = '';
+                if (data.history.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No command history</p>';
+                } else {
+                    data.history.forEach(cmd => {
+                        html += `
+                            <div class="device-item" style="border-left-color: var(--neon-blue);">
+                                <div style="font-family: monospace; color: var(--neon-green);">$ ${cmd.command}</div>
+                                <div style="color: #888; font-size: 11px;">${new Date(cmd.timestamp).toLocaleString()}</div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('commandHistoryList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
         // Security Functions (Module 5)
         async function refreshSecurityStatus() {
             try {
@@ -1468,6 +1713,10 @@
             refreshVpnStatus();
             refreshLoginHistory();
             refreshPortScanAlerts();
+            refreshDeviceTags();
+            refreshBandwidthQuotas();
+            refreshAutoAlerts();
+            refreshCommandHistory();
         });
     </script>
 </body>

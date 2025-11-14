@@ -306,6 +306,78 @@ class TracerouteResult(db.Model):
             'completed': self.completed
         }
 
+class DeviceTag(db.Model):
+    """Store tagged/named devices (Module 7)"""
+    id = db.Column(db.Integer, primary_key=True)
+    mac_address = db.Column(db.String(17), nullable=False, unique=True)
+    device_name = db.Column(db.String(100), nullable=False)
+    device_type = db.Column(db.String(50), nullable=True)  # 'phone', 'laptop', 'iot', 'printer', etc
+    description = db.Column(db.Text, nullable=True)
+    color_tag = db.Column(db.String(20), nullable=True)  # for UI coloring
+    is_monitored = db.Column(db.Boolean, default=True)
+    
+    def to_dict(self):
+        return {
+            'mac_address': self.mac_address,
+            'device_name': self.device_name,
+            'device_type': self.device_type,
+            'description': self.description,
+            'color_tag': self.color_tag,
+            'is_monitored': self.is_monitored
+        }
+
+class BandwidthQuota(db.Model):
+    """Store bandwidth quota rules (Module 7)"""
+    id = db.Column(db.Integer, primary_key=True)
+    mac_address = db.Column(db.String(17), nullable=False)
+    daily_limit_mb = db.Column(db.Integer, nullable=False)  # daily limit in MB
+    monthly_limit_gb = db.Column(db.Integer, nullable=False)  # monthly limit in GB
+    alert_threshold = db.Column(db.Integer, default=80)  # alert at 80% usage
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'mac_address': self.mac_address,
+            'daily_limit_mb': self.daily_limit_mb,
+            'monthly_limit_gb': self.monthly_limit_gb,
+            'alert_threshold': self.alert_threshold
+        }
+
+class AutoAlert(db.Model):
+    """Store automated alert rules (Module 7)"""
+    id = db.Column(db.Integer, primary_key=True)
+    alert_type = db.Column(db.String(50), nullable=False)  # 'uptime', 'bandwidth', 'cpu', 'memory', 'device_offline'
+    threshold = db.Column(db.Float, nullable=False)
+    enabled = db.Column(db.Boolean, default=True)
+    email_notify = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'alert_type': self.alert_type,
+            'threshold': self.threshold,
+            'enabled': self.enabled,
+            'email_notify': self.email_notify
+        }
+
+class CommandHistory(db.Model):
+    """Store command execution history (Module 8)"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    command = db.Column(db.String(500), nullable=False)
+    output = db.Column(db.Text, nullable=True)
+    exit_code = db.Column(db.Integer, nullable=True)
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'command': self.command,
+            'output': self.output[:200] if self.output else '',
+            'exit_code': self.exit_code
+        }
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -736,6 +808,130 @@ def run_traceroute_check(target):
         logger.error(f"Error running traceroute: {str(e)}")
         return None
 
+def tag_device(mac_address, device_name, device_type=None, description=None):
+    """Tag/label a device for tracking (Module 7)"""
+    try:
+        existing = DeviceTag.query.filter_by(mac_address=mac_address).first()
+        if existing:
+            existing.device_name = device_name
+            existing.device_type = device_type
+            existing.description = description
+        else:
+            tag = DeviceTag(
+                mac_address=mac_address,
+                device_name=device_name,
+                device_type=device_type,
+                description=description
+            )
+            db.session.add(tag)
+        db.session.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error tagging device: {str(e)}")
+        return False
+
+def get_device_tags():
+    """Get all tagged devices (Module 7)"""
+    try:
+        tags = DeviceTag.query.all()
+        return [t.to_dict() for t in tags]
+    except Exception as e:
+        logger.error(f"Error getting device tags: {str(e)}")
+        return []
+
+def set_bandwidth_quota(mac_address, daily_limit_mb, monthly_limit_gb):
+    """Set bandwidth quota for a device (Module 7)"""
+    try:
+        existing = BandwidthQuota.query.filter_by(mac_address=mac_address).first()
+        if existing:
+            existing.daily_limit_mb = daily_limit_mb
+            existing.monthly_limit_gb = monthly_limit_gb
+        else:
+            quota = BandwidthQuota(
+                mac_address=mac_address,
+                daily_limit_mb=daily_limit_mb,
+                monthly_limit_gb=monthly_limit_gb
+            )
+            db.session.add(quota)
+        db.session.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error setting bandwidth quota: {str(e)}")
+        return False
+
+def get_bandwidth_quotas():
+    """Get all bandwidth quotas (Module 7)"""
+    try:
+        quotas = BandwidthQuota.query.all()
+        return [q.to_dict() for q in quotas]
+    except Exception as e:
+        logger.error(f"Error getting bandwidth quotas: {str(e)}")
+        return []
+
+def create_auto_alert(alert_type, threshold, email_notify=False):
+    """Create an automated alert rule (Module 7)"""
+    try:
+        alert = AutoAlert(
+            alert_type=alert_type,
+            threshold=threshold,
+            email_notify=email_notify
+        )
+        db.session.add(alert)
+        db.session.commit()
+        return alert.to_dict()
+    except Exception as e:
+        logger.error(f"Error creating auto alert: {str(e)}")
+        return None
+
+def get_auto_alerts():
+    """Get all automated alerts (Module 7)"""
+    try:
+        alerts = AutoAlert.query.all()
+        return [a.to_dict() for a in alerts]
+    except Exception as e:
+        logger.error(f"Error getting auto alerts: {str(e)}")
+        return []
+
+def execute_router_command(user_id, command):
+    """Execute a router command with history tracking (Module 8)"""
+    try:
+        # Sanitize command - only allow safe commands
+        safe_commands = ['ping', 'tracert', 'traceroute', 'ipconfig', 'ifconfig', 'arp']
+        if not any(cmd in command.lower() for cmd in safe_commands):
+            return {'error': 'Command not allowed', 'exit_code': 1}
+        
+        result = subprocess.run(command.split(), capture_output=True, text=True, timeout=10)
+        
+        # Record in history
+        history = CommandHistory(
+            user_id=user_id,
+            command=command,
+            output=result.stdout[:1000],
+            exit_code=result.returncode
+        )
+        db.session.add(history)
+        db.session.commit()
+        
+        return {
+            'output': result.stdout[:500],
+            'error': result.stderr[:200] if result.stderr else '',
+            'exit_code': result.returncode
+        }
+    except subprocess.TimeoutExpired:
+        return {'error': 'Command timed out', 'exit_code': -1}
+    except Exception as e:
+        logger.error(f"Error executing command: {str(e)}")
+        return {'error': str(e), 'exit_code': -1}
+
+def get_command_history(user_id, limit=50):
+    """Get command execution history (Module 8)"""
+    try:
+        history = CommandHistory.query.filter_by(user_id=user_id).order_by(CommandHistory.timestamp.desc()).limit(limit).all()
+        return [h.to_dict() for h in history]
+    except Exception as e:
+        logger.error(f"Error getting command history: {str(e)}")
+        return []
+
 # Initialize database
 def init_db():
     with app.app_context():
@@ -1158,6 +1354,113 @@ def traceroute():
     except Exception as e:
         logger.error(f"Error in traceroute: {str(e)}")
         return jsonify({'error': 'Traceroute error'}), 500
+
+@app.route('/api/device-tags')
+@login_required
+def device_tags():
+    """Get all tagged devices (Module 7)"""
+    try:
+        tags = get_device_tags()
+        return jsonify({'tags': tags})
+    except Exception as e:
+        logger.error(f"Error in device_tags: {str(e)}")
+        return jsonify({'error': 'Failed to get device tags'}), 500
+
+@app.route('/api/device-tag', methods=['POST'])
+@login_required
+def add_device_tag():
+    """Add or update device tag (Module 7)"""
+    try:
+        data = request.json
+        success = tag_device(
+            mac_address=data.get('mac_address'),
+            device_name=data.get('device_name'),
+            device_type=data.get('device_type'),
+            description=data.get('description')
+        )
+        return jsonify({'status': 'tagged' if success else 'failed'})
+    except Exception as e:
+        logger.error(f"Error in add_device_tag: {str(e)}")
+        return jsonify({'error': 'Failed to tag device'}), 500
+
+@app.route('/api/bandwidth-quotas')
+@login_required
+def bandwidth_quotas():
+    """Get bandwidth quotas (Module 7)"""
+    try:
+        quotas = get_bandwidth_quotas()
+        return jsonify({'quotas': quotas})
+    except Exception as e:
+        logger.error(f"Error in bandwidth_quotas: {str(e)}")
+        return jsonify({'error': 'Failed to get quotas'}), 500
+
+@app.route('/api/bandwidth-quota', methods=['POST'])
+@login_required
+def set_quota():
+    """Set bandwidth quota for device (Module 7)"""
+    try:
+        data = request.json
+        success = set_bandwidth_quota(
+            mac_address=data.get('mac_address'),
+            daily_limit_mb=data.get('daily_limit_mb', 1000),
+            monthly_limit_gb=data.get('monthly_limit_gb', 30)
+        )
+        return jsonify({'status': 'set' if success else 'failed'})
+    except Exception as e:
+        logger.error(f"Error in set_quota: {str(e)}")
+        return jsonify({'error': 'Failed to set quota'}), 500
+
+@app.route('/api/auto-alerts')
+@login_required
+def auto_alerts():
+    """Get auto alert rules (Module 7)"""
+    try:
+        alerts = get_auto_alerts()
+        return jsonify({'alerts': alerts})
+    except Exception as e:
+        logger.error(f"Error in auto_alerts: {str(e)}")
+        return jsonify({'error': 'Failed to get auto alerts'}), 500
+
+@app.route('/api/auto-alert', methods=['POST'])
+@login_required
+def create_alert():
+    """Create auto alert rule (Module 7)"""
+    try:
+        data = request.json
+        alert = create_auto_alert(
+            alert_type=data.get('alert_type'),
+            threshold=data.get('threshold', 80),
+            email_notify=data.get('email_notify', False)
+        )
+        return jsonify(alert if alert else {'error': 'Failed to create alert'})
+    except Exception as e:
+        logger.error(f"Error in create_alert: {str(e)}")
+        return jsonify({'error': 'Failed to create auto alert'}), 500
+
+@app.route('/api/command-execute', methods=['POST'])
+@login_required
+def command_execute():
+    """Execute a router command (Module 8)"""
+    try:
+        data = request.json
+        command = data.get('command', '').strip()
+        result = execute_router_command(current_user.id, command)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in command_execute: {str(e)}")
+        return jsonify({'error': 'Failed to execute command'}), 500
+
+@app.route('/api/command-history')
+@login_required
+def command_history():
+    """Get command execution history (Module 8)"""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        history = get_command_history(current_user.id, limit=limit)
+        return jsonify({'history': history})
+    except Exception as e:
+        logger.error(f"Error in command_history: {str(e)}")
+        return jsonify({'error': 'Failed to get command history'}), 500
 
 def run_network_diagnostic(diagnostic_type, target):
     """Run network diagnostics"""
