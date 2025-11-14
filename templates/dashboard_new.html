@@ -223,43 +223,57 @@
         }
 
         .device-item {
-            background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(0, 255, 150, 0.05));
+            background: linear-gradient(135deg, rgba(10, 30, 60, 0.8), rgba(15, 40, 70, 0.9));
             border-left: 4px solid var(--neon-green);
             padding: 15px;
             margin-bottom: 12px;
             border-radius: 8px;
             font-size: 14px;
             font-family: 'Segoe UI', sans-serif;
-            box-shadow: 0 2px 8px rgba(0, 212, 255, 0.2);
+            box-shadow: 0 2px 8px rgba(0, 212, 255, 0.15);
             transition: all 0.3s ease;
         }
 
+        .device-item.offline {
+            background: linear-gradient(135deg, rgba(40, 30, 30, 0.8), rgba(50, 35, 35, 0.9));
+            border-left-color: #ff6b6b;
+            opacity: 0.7;
+        }
+
         .device-item:hover {
-            background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(0, 255, 150, 0.1));
-            box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+            background: linear-gradient(135deg, rgba(20, 50, 90, 0.9), rgba(25, 60, 100, 1));
+            box-shadow: 0 4px 12px rgba(0, 212, 255, 0.4);
             transform: translateX(5px);
         }
 
         .device-item .device-header {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 2fr 1fr;
             gap: 15px;
             margin-bottom: 10px;
-            border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+            border-bottom: 1px solid rgba(0, 212, 255, 0.3);
             padding-bottom: 10px;
         }
 
         .device-item .device-ip {
-            color: var(--neon-blue);
+            color: #00ff00;
             font-weight: bold;
+            font-size: 16px;
+            letter-spacing: 1px;
+        }
+
+        .device-item .device-name {
+            color: #00ffff;
+            font-weight: 600;
             font-size: 15px;
+            margin-bottom: 5px;
         }
 
         .device-item .device-mac {
-            color: var(--neon-purple);
+            color: #88dd00;
             font-size: 12px;
             font-family: 'Courier New', monospace;
-            opacity: 0.8;
+            opacity: 0.9;
         }
 
         .device-item .device-details {
@@ -273,25 +287,25 @@
             display: flex;
             justify-content: space-between;
             padding: 5px 0;
-            color: #ddd;
+            color: #e0e0e0;
         }
 
         .device-item .detail-label {
-            color: var(--neon-green);
+            color: #00ff88;
             font-weight: 500;
             margin-right: 10px;
         }
 
         .device-item .detail-value {
-            color: var(--neon-blue);
+            color: #ffff00;
             font-weight: 600;
         }
 
         .device-item .bandwidth-badge {
             display: inline-block;
-            background: rgba(0, 255, 150, 0.2);
-            border: 1px solid var(--neon-green);
-            color: var(--neon-green);
+            background: rgba(0, 255, 100, 0.3);
+            border: 1px solid #00ff64;
+            color: #00ff88;
             padding: 4px 10px;
             border-radius: 20px;
             font-size: 11px;
@@ -301,13 +315,30 @@
 
         .device-item .data-badge {
             display: inline-block;
-            background: rgba(0, 212, 255, 0.2);
-            border: 1px solid var(--neon-blue);
-            color: var(--neon-blue);
+            background: rgba(0, 150, 255, 0.3);
+            border: 1px solid #0099ff;
+            color: #00ccff;
             padding: 4px 10px;
             border-radius: 20px;
             font-size: 11px;
             font-weight: bold;
+        }
+
+        .device-item .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            background: rgba(0, 255, 100, 0.3);
+            color: #00ff88;
+            border: 1px solid #00ff64;
+        }
+
+        .device-item.offline .status-badge {
+            background: rgba(255, 100, 100, 0.3);
+            color: #ff9999;
+            border: 1px solid #ff6b6b;
         }
 
         .chart-container {
@@ -949,6 +980,9 @@
             
             document.getElementById(tabName).classList.add('active');
             event.target.classList.add('active');
+            
+            // Save current tab to localStorage for persistence
+            localStorage.setItem('currentTab', tabName);
 
             // Initialize charts when switching to performance tab
             if (tabName === 'performance') {
@@ -1079,24 +1113,29 @@
                     html = '<p style="color: #888; text-align: center;">No devices found</p>';
                 } else {
                     data.devices.forEach((device, idx) => {
+                        const isOffline = device.status === 'Offline';
                         const iconMap = {
                             'WiFi-6': '📶',
                             '5GHz': '📡',
                             '2.4GHz': '📊',
                             'Ethernet': '🔗',
+                            'Offline': '⚪',
                             'default': '🖥️'
                         };
                         const icon = iconMap[device.bandwidth] || iconMap['default'];
+                        const statusIcon = isOffline ? '❌' : '✅';
                         
                         html += `
-                            <div class="device-item">
+                            <div class="device-item ${isOffline ? 'offline' : ''}">
                                 <div class="device-header">
                                     <div>
+                                        <div class="device-name">${statusIcon} ${device.name}</div>
                                         <div class="device-ip">${icon} ${device.ip}</div>
                                         <div class="device-mac">${device.mac}</div>
                                     </div>
                                     <div>
                                         <span class="bandwidth-badge">📶 ${device.bandwidth}</span>
+                                        <span class="status-badge">${device.status}</span>
                                     </div>
                                 </div>
                                 <div class="device-details">
@@ -1106,7 +1145,7 @@
                                     </div>
                                     <div class="detail-row">
                                         <span class="detail-label">📊 Data Used:</span>
-                                        <span class="data-badge">${device.data_used}</span>
+                                        ${device.data_used === 'N/A' ? '<span class="detail-value">N/A</span>' : '<span class="data-badge">' + device.data_used + '</span>'}
                                     </div>
                                     <div class="detail-row">
                                         <span class="detail-label">🌐 Type:</span>
@@ -1114,7 +1153,7 @@
                                     </div>
                                     <div class="detail-row">
                                         <span class="detail-label">⚡ Status:</span>
-                                        <span class="detail-value">Active</span>
+                                        <span class="detail-value">${device.status}</span>
                                     </div>
                                 </div>
                             </div>
@@ -1895,6 +1934,21 @@
 
         // Initial load
         document.addEventListener('DOMContentLoaded', () => {
+            // Restore saved tab
+            const savedTab = localStorage.getItem('currentTab');
+            if (savedTab && document.getElementById(savedTab)) {
+                // Find and click the appropriate tab button
+                const tabButtons = document.querySelectorAll('.tab-btn');
+                for (let btn of tabButtons) {
+                    // Check if this button is for the saved tab
+                    const tabId = btn.onclick.toString().match(/switchTab\('(\w+)'\)/);
+                    if (tabId && tabId[1] === savedTab) {
+                        btn.click();
+                        break;
+                    }
+                }
+            }
+            
             refreshRouterStatus();
             refreshStats();
             refreshDevices();
