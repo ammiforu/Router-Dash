@@ -12,6 +12,10 @@ import logging
 from dotenv import load_dotenv
 import subprocess
 import platform
+import socket
+import time
+import psutil
+import json
 
 # Load environment variables
 load_dotenv()
@@ -74,6 +78,44 @@ class RouterStatus(db.Model):
             'response_time': self.response_time,
             'last_checked': self.last_checked.isoformat() if self.last_checked else None,
             'error_message': self.error_message
+        }
+
+class NetworkStats(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    bytes_sent = db.Column(db.BigInteger, nullable=True)
+    bytes_recv = db.Column(db.BigInteger, nullable=True)
+    packets_sent = db.Column(db.BigInteger, nullable=True)
+    packets_recv = db.Column(db.BigInteger, nullable=True)
+    cpu_usage = db.Column(db.Float, nullable=True)
+    memory_usage = db.Column(db.Float, nullable=True)
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'bytes_sent': self.bytes_sent,
+            'bytes_recv': self.bytes_recv,
+            'packets_sent': self.packets_sent,
+            'packets_recv': self.packets_recv,
+            'cpu_usage': self.cpu_usage,
+            'memory_usage': self.memory_usage
+        }
+
+class SecurityLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    event_type = db.Column(db.String(50), nullable=False)  # 'login_attempt', 'port_scan', 'rule_violation', etc
+    severity = db.Column(db.String(20), nullable=False)  # 'info', 'warning', 'critical'
+    message = db.Column(db.Text, nullable=False)
+    source_ip = db.Column(db.String(15), nullable=True)
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'event_type': self.event_type,
+            'severity': self.severity,
+            'message': self.message,
+            'source_ip': self.source_ip
         }
 
 @login_manager.user_loader
@@ -152,6 +194,48 @@ def check_router_status():
             'error_message': 'Unable to check status'
         }
 
+def get_network_stats():
+    """Get system network statistics"""
+    try:
+        net_stats = psutil.net_io_counters()
+        cpu_usage = psutil.cpu_percent(interval=1)
+        memory_info = psutil.virtual_memory()
+        
+        return {
+            'bytes_sent': net_stats.bytes_sent,
+            'bytes_recv': net_stats.bytes_recv,
+            'packets_sent': net_stats.packets_sent,
+            'packets_recv': net_stats.packets_recv,
+            'cpu_usage': cpu_usage,
+            'memory_usage': memory_info.percent,
+            'memory_total': memory_info.total,
+            'memory_available': memory_info.available,
+        }
+    except Exception as e:
+        logger.error(f"Error getting network stats: {str(e)}")
+        return None
+
+def get_connected_devices():
+    """Get list of connected devices"""
+    try:
+        devices = []
+        if platform.system() == 'Windows':
+            result = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=5)
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if '192.168' in line or '10.0' in line:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        devices.append({
+                            'ip': parts[0],
+                            'mac': parts[1],
+                            'type': parts[2] if len(parts) > 2 else 'dynamic'
+                        })
+        return devices[:50]
+    except Exception as e:
+        logger.error(f"Error getting connected devices: {str(e)}")
+        return []
+
 # Initialize database
 def init_db():
     with app.app_context():
@@ -181,7 +265,7 @@ def init_db():
 @app.route('/')
 @login_required
 def dashboard():
-    return render_template('dashboard.html')
+    return render_template('dashboard_new.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -270,6 +354,114 @@ def router_status():
     except Exception as e:
         logger.error(f"Error in router_status endpoint: {str(e)}")
         return jsonify({'error': 'Failed to check router status'}), 500
+
+@app.route('/api/network-stats')
+@login_required
+def network_stats():
+    """Get network statistics"""
+    try:
+        stats = get_network_stats()
+        if stats:
+            # Save to database
+            net_stat_record = NetworkStats(
+                bytes_sent=stats['bytes_sent'],
+                bytes_recv=stats['bytes_recv'],
+                packets_sent=stats['packets_sent'],
+                packets_recv=stats['packets_recv'],
+                cpu_usage=stats['cpu_usage'],
+                memory_usage=stats['memory_usage']
+            )
+            db.session.add(net_stat_record)
+            db.session.commit()
+            return jsonify(stats)
+        return jsonify({'error': 'Unable to get stats'}), 500
+    except Exception as e:
+        logger.error(f"Error in network_stats: {str(e)}")
+        return jsonify({'error': 'Failed to get network stats'}), 500
+
+@app.route('/api/connected-devices')
+@login_required
+def connected_devices():
+    """Get connected devices"""
+    try:
+        devices = get_connected_devices()
+        return jsonify({'devices': devices, 'count': len(devices)})
+    except Exception as e:
+        logger.error(f"Error in connected_devices: {str(e)}")
+        return jsonify({'error': 'Failed to get connected devices'}), 500
+
+@app.route('/api/diagnostics', methods=['POST'])
+@login_required
+def run_diagnostics():
+    """Run network diagnostics"""
+    try:
+        data = request.get_json()
+        diag_type = data.get('type')  # ping, traceroute, nslookup
+        target = data.get('target')
+        
+        if not diag_type or not target:
+            return jsonify({'error': 'Missing type or target'}), 400
+        
+        result = run_network_diagnostic(diag_type, target)
+        
+        # Log the diagnostic
+        logger.info(f"Diagnostic {diag_type} run on {target}")
+        
+        return jsonify({'type': diag_type, 'target': target, 'result': result})
+    except Exception as e:
+        logger.error(f"Error in diagnostics: {str(e)}")
+        return jsonify({'error': 'Failed to run diagnostic'}), 500
+
+@app.route('/api/security-logs')
+@login_required
+def security_logs():
+    """Get security logs"""
+    try:
+        logs = SecurityLog.query.order_by(SecurityLog.timestamp.desc()).limit(50).all()
+        return jsonify({'logs': [log.to_dict() for log in logs]})
+    except Exception as e:
+        logger.error(f"Error in security_logs: {str(e)}")
+        return jsonify({'error': 'Failed to get security logs'}), 500
+
+@app.route('/api/stats-history')
+@login_required
+def stats_history():
+    """Get historical network statistics"""
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        since = datetime.utcnow() - timedelta(hours=hours)
+        stats = NetworkStats.query.filter(NetworkStats.timestamp >= since).order_by(NetworkStats.timestamp).all()
+        return jsonify({'stats': [s.to_dict() for s in stats]})
+    except Exception as e:
+        logger.error(f"Error in stats_history: {str(e)}")
+        return jsonify({'error': 'Failed to get stats history'}), 500
+
+def run_network_diagnostic(diagnostic_type, target):
+    """Run network diagnostics"""
+    try:
+        if diagnostic_type == 'ping':
+            param = '-n' if platform.system().lower() == 'windows' else '-c'
+            cmd = ['ping', param, '4', target]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            return result.stdout[:500]
+        
+        elif diagnostic_type == 'traceroute':
+            cmd = ['tracert' if platform.system().lower() == 'windows' else 'traceroute', target]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            return result.stdout[:500]
+        
+        elif diagnostic_type == 'nslookup':
+            try:
+                ip = socket.gethostbyname(target)
+                return f"Host: {target}\nIP Address: {ip}"
+            except:
+                return f"Could not resolve {target}"
+        
+        return "Unknown diagnostic type"
+    except subprocess.TimeoutExpired:
+        return "Diagnostic timed out"
+    except Exception as e:
+        return f"Error: {str(e)[:200]}"
 
 @app.errorhandler(404)
 def not_found(error):
