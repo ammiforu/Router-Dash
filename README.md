@@ -4,6 +4,7 @@ A secure Flask-based web dashboard for monitoring router status with user authen
 
 ## Features
 
+### Core Features
 - ✅ User authentication with secure password hashing
 - ✅ Real-time router status monitoring
 - ✅ Response time tracking
@@ -11,6 +12,13 @@ A secure Flask-based web dashboard for monitoring router status with user authen
 - ✅ CSRF protection
 - ✅ Activity logging
 - ✅ Session management
+
+### 🆕 Device Management Features
+- ✏️ **Edit Device Names** - Customize device names for easy identification
+- 🆕 **New Device Detection** - Automatic badges for newly discovered devices
+- 🔒 **Block/Unblock Devices** - Control device network access
+- 📊 **Device Information** - MAC address, IP, connection time, bandwidth tracking
+- 🎯 **Drag & Drop** - Intuitive interface for device management
 
 ## Security Improvements Made
 
@@ -230,6 +238,32 @@ Delete `instance/router_dashboard.db` and restart:
 rm instance/router_dashboard.db
 python app.py
 ```
+
+## 🚀 Quick Start - Device Management
+
+The dashboard now includes powerful device management features:
+
+### ✏️ Edit Device Names
+1. Go to **Connected Devices** tab
+2. Click **✏️ Edit** on any device
+3. Change the device name
+4. Click **Save Changes** - name persists automatically!
+
+### 🆕 See New Devices
+- Newly discovered devices show with a **🆕 NEW** badge
+- A summary banner appears at the top listing all new devices
+- Perfect for spotting unauthorized devices on your network
+
+### 🔒 Block/Unblock Devices
+1. Click **🔒 Lock** button to block device from network
+2. Device appears faded - status is blocked
+3. Click **🔓 Unlock** button to allow device back on network
+4. Status persists across sessions
+
+### 📚 Documentation
+- **Quick Start Guide**: `DEVICE_MANAGEMENT_QUICK_START.md` - User-friendly walkthrough
+- **Technical Docs**: `DEVICE_MANAGEMENT_FEATURES.md` - Full API and implementation details
+- **Session Summary**: `SESSION_SUMMARY.md` - Complete implementation report
 
 ## Security Notes
 
