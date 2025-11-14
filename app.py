@@ -118,6 +118,44 @@ class SecurityLog(db.Model):
             'source_ip': self.source_ip
         }
 
+class ServiceStatus(db.Model):
+    """Track status of system services"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    service_name = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # 'running', 'stopped', 'error'
+    uptime = db.Column(db.Float, nullable=True)  # in seconds
+    memory_usage = db.Column(db.Float, nullable=True)  # in MB
+    cpu_usage = db.Column(db.Float, nullable=True)  # percentage
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'service_name': self.service_name,
+            'status': self.status,
+            'uptime': self.uptime,
+            'memory_usage': self.memory_usage,
+            'cpu_usage': self.cpu_usage
+        }
+
+class SystemLog(db.Model):
+    """Store system event logs for real-time monitoring"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    log_type = db.Column(db.String(50), nullable=False)  # 'system', 'network', 'application', 'security'
+    level = db.Column(db.String(20), nullable=False)  # 'DEBUG', 'INFO', 'WARNING', 'ERROR'
+    component = db.Column(db.String(100), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'log_type': self.log_type,
+            'level': self.level,
+            'component': self.component,
+            'message': self.message
+        }
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -235,6 +273,65 @@ def get_connected_devices():
     except Exception as e:
         logger.error(f"Error getting connected devices: {str(e)}")
         return []
+
+def get_service_health():
+    """Get system service health status"""
+    services = []
+    try:
+        # Get process information
+        for proc in psutil.process_iter(['pid', 'name', 'status', 'memory_info', 'cpu_num']):
+            try:
+                if proc.name() in ['python.exe', 'nginx', 'mysql', 'dnsmasq', 'hostapd']:
+                    services.append({
+                        'name': proc.name(),
+                        'status': 'running',
+                        'pid': proc.pid,
+                        'memory_mb': proc.memory_info().rss / 1024 / 1024,
+                        'cpu_percent': proc.cpu_percent(interval=0.1)
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        
+        # Add common services that might not be running
+        for service_name in ['DNS', 'DHCP', 'Firewall']:
+            if not any(s['name'] == service_name for s in services):
+                services.append({
+                    'name': service_name,
+                    'status': 'unknown',
+                    'pid': None,
+                    'memory_mb': 0,
+                    'cpu_percent': 0
+                })
+        
+        return services
+    except Exception as e:
+        logger.error(f"Error getting service health: {str(e)}")
+        return []
+
+def get_system_logs(limit=100, log_type=None):
+    """Get recent system logs"""
+    try:
+        query = SystemLog.query.order_by(SystemLog.timestamp.desc())
+        if log_type:
+            query = query.filter_by(log_type=log_type)
+        return [log.to_dict() for log in query.limit(limit).all()]
+    except Exception as e:
+        logger.error(f"Error getting system logs: {str(e)}")
+        return []
+
+def add_system_log(log_type, level, component, message):
+    """Add a new system log entry"""
+    try:
+        log = SystemLog(
+            log_type=log_type,
+            level=level,
+            component=component,
+            message=message
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Error adding system log: {str(e)}")
 
 # Initialize database
 def init_db():
@@ -435,6 +532,60 @@ def stats_history():
     except Exception as e:
         logger.error(f"Error in stats_history: {str(e)}")
         return jsonify({'error': 'Failed to get stats history'}), 500
+
+@app.route('/api/service-health')
+@login_required
+def service_health():
+    """Get service health status"""
+    try:
+        services = get_service_health()
+        
+        # Store service status in database
+        for service in services:
+            status = ServiceStatus(
+                service_name=service['name'],
+                status=service['status'],
+                memory_usage=service.get('memory_mb', 0),
+                cpu_usage=service.get('cpu_percent', 0),
+                uptime=None
+            )
+            db.session.add(status)
+        db.session.commit()
+        
+        return jsonify({'services': services})
+    except Exception as e:
+        logger.error(f"Error in service_health: {str(e)}")
+        return jsonify({'error': 'Failed to get service health'}), 500
+
+@app.route('/api/system-logs')
+@login_required
+def system_logs():
+    """Get system logs"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        log_type = request.args.get('type', None)
+        logs = get_system_logs(limit=limit, log_type=log_type)
+        return jsonify({'logs': logs})
+    except Exception as e:
+        logger.error(f"Error in system_logs: {str(e)}")
+        return jsonify({'error': 'Failed to get system logs'}), 500
+
+@app.route('/api/log-event', methods=['POST'])
+@login_required
+def log_event():
+    """Add a new log event"""
+    try:
+        data = request.json
+        add_system_log(
+            log_type=data.get('log_type', 'application'),
+            level=data.get('level', 'INFO'),
+            component=data.get('component', 'unknown'),
+            message=data.get('message', '')
+        )
+        return jsonify({'status': 'logged'})
+    except Exception as e:
+        logger.error(f"Error in log_event: {str(e)}")
+        return jsonify({'error': 'Failed to log event'}), 500
 
 def run_network_diagnostic(diagnostic_type, target):
     """Run network diagnostics"""

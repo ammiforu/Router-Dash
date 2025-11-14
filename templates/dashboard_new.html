@@ -409,6 +409,8 @@
             <button class="tab-btn" onclick="switchTab('devices')">🔌 Connected Devices</button>
             <button class="tab-btn" onclick="switchTab('performance')">⚡ Performance</button>
             <button class="tab-btn" onclick="switchTab('diagnostics')">🔍 Diagnostics</button>
+            <button class="tab-btn" onclick="switchTab('services')">🛠️ Services</button>
+            <button class="tab-btn" onclick="switchTab('logs')">📋 Logs</button>
             <button class="tab-btn" onclick="switchTab('security')">🔐 Security</button>
             <button class="tab-btn" onclick="switchTab('analytics')">📈 Analytics</button>
         </div>
@@ -522,6 +524,43 @@
                 <div class="diagnostic-output" id="diagOutput"></div>
                 <div class="refresh-info">
                     Tip: Test connectivity to external servers
+                </div>
+            </div>
+        </div>
+
+        <!-- Services Tab -->
+        <div id="services" class="tab-content">
+            <div class="card">
+                <h3>🛠️ System Services</h3>
+                <button class="diagnostic-btn" onclick="refreshServices()" style="width: 100%; margin-bottom: 15px;">Refresh Services</button>
+                <div id="servicesList">
+                    <p style="color: #888; text-align: center;">Loading...</p>
+                </div>
+                <div class="refresh-info">
+                    Real-time service health monitoring
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="logs" class="tab-content">
+            <div class="card">
+                <h3>📋 System Event Logs</h3>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <select id="logFilter" style="flex: 1; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
+                        <option value="">All Logs</option>
+                        <option value="system">System</option>
+                        <option value="network">Network</option>
+                        <option value="application">Application</option>
+                        <option value="security">Security</option>
+                    </select>
+                    <button class="diagnostic-btn" onclick="refreshSystemLogs()" style="padding: 10px 20px;">Refresh</button>
+                </div>
+                <div class="security-log" id="systemLogList">
+                    <p style="color: #888; text-align: center;">Loading...</p>
+                </div>
+                <div class="refresh-info">
+                    Last 100 events shown
                 </div>
             </div>
         </div>
@@ -705,6 +744,78 @@
             }
         }
 
+        // Services (Module 3)
+        async function refreshServices() {
+            try {
+                const response = await fetch('/api/service-health');
+                const data = await response.json();
+                
+                let html = '';
+                if (data.services.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No services found</p>';
+                } else {
+                    data.services.forEach(service => {
+                        const statusColor = service.status === 'running' ? 'var(--neon-green)' : 'var(--danger)';
+                        html += `
+                            <div class="device-item" style="border-left-color: ${statusColor}">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span><strong>${service.name}</strong> - ${service.status.toUpperCase()}</span>
+                                </div>
+                                <div style="font-size: 12px; color: #a0a0a0; margin-top: 5px;">
+                                    Memory: ${service.memory_mb ? service.memory_mb.toFixed(2) + ' MB' : 'N/A'} | 
+                                    CPU: ${service.cpu_percent ? service.cpu_percent.toFixed(1) + '%' : 'N/A'}
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                document.getElementById('servicesList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('servicesList').innerHTML = '<p style="color: var(--danger);">Error loading services</p>';
+            }
+        }
+
+        // System Logs (Module 3)
+        async function refreshSystemLogs() {
+            try {
+                const logType = document.getElementById('logFilter').value;
+                let url = '/api/system-logs?limit=100';
+                if (logType) url += '&type=' + logType;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                let html = '';
+                if (data.logs.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No logs found</p>';
+                } else {
+                    data.logs.forEach(log => {
+                        const levelColor = {
+                            'ERROR': 'var(--danger)',
+                            'WARNING': 'var(--warning)',
+                            'INFO': 'var(--neon-blue)',
+                            'DEBUG': 'var(--neon-purple)'
+                        }[log.level] || 'var(--neon-green)';
+                        
+                        html += `
+                            <div class="log-entry ${log.level.toLowerCase()}">
+                                <div class="log-time">${new Date(log.timestamp).toLocaleString()}</div>
+                                <div class="log-event" style="color: ${levelColor};">[${log.log_type.toUpperCase()}] ${log.component}</div>
+                                <div class="log-message">${log.message}</div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                document.getElementById('systemLogList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('systemLogList').innerHTML = '<p style="color: var(--danger);">Error loading logs</p>';
+            }
+        }
+
         // Charts
         function initializeCharts() {
             if (cpuChart) return;
@@ -838,6 +949,8 @@
             refreshStats();
             refreshDevices();
             refreshSecurityLogs();
+            refreshServices();
+            refreshSystemLogs();
         });
     </script>
 </body>
