@@ -621,9 +621,21 @@ def get_connected_devices():
                         try:
                             device_ip = parts[0]
                             device_mac = parts[1].replace('-', ':')  # Convert dashes to colons
+                            ip_octets = [int(x) for x in device_ip.split('.')]
                             
-                            # Skip broadcast/multicast and router IP
-                            if device_ip != router_ip and not device_ip.endswith('.255') and ':' in device_mac:
+                            # Filter criteria:
+                            # 1. Skip router IP
+                            # 2. Skip broadcast (.255)
+                            # 3. Skip multicast (224.0.0.0 to 239.255.255.255)
+                            # 4. Skip reserved ranges (0.x, 127.x, 169.254.x - link-local)
+                            # 5. Skip localhost (127.0.0.x)
+                            is_multicast = ip_octets[0] >= 224 and ip_octets[0] <= 239
+                            is_reserved = ip_octets[0] == 0 or ip_octets[0] == 127 or ip_octets[0] == 169
+                            is_broadcast = device_ip.endswith('.255') or device_ip.endswith('.0')
+                            is_router = device_ip == router_ip
+                            is_valid_mac = ':' in device_mac and device_mac.count(':') == 5
+                            
+                            if not (is_multicast or is_reserved or is_broadcast or is_router) and is_valid_mac:
                                 devices.append({
                                     'ip': device_ip,
                                     'mac': device_mac,
@@ -647,12 +659,20 @@ def get_connected_devices():
                         continue
                     
                     parts = line.split()
-                    if len(parts) >= 2 and '.' in parts[0]:
+                    if len(parts) >= 3 and '.' in parts[0]:
                         try:
                             device_ip = parts[0]
                             device_mac = parts[2] if len(parts) > 2 else 'Unknown'
+                            ip_octets = [int(x) for x in device_ip.split('.')]
                             
-                            if device_ip != router_ip and ':' in device_mac:
+                            # Same filtering as Windows
+                            is_multicast = ip_octets[0] >= 224 and ip_octets[0] <= 239
+                            is_reserved = ip_octets[0] == 0 or ip_octets[0] == 127 or ip_octets[0] == 169
+                            is_broadcast = device_ip.endswith('.255') or device_ip.endswith('.0')
+                            is_router = device_ip == router_ip
+                            is_valid_mac = ':' in device_mac and device_mac.count(':') == 5
+                            
+                            if not (is_multicast or is_reserved or is_broadcast or is_router) and is_valid_mac:
                                 devices.append({
                                     'ip': device_ip,
                                     'mac': device_mac,
