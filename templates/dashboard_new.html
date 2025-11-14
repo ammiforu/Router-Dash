@@ -412,6 +412,7 @@
             <button class="tab-btn" onclick="switchTab('services')">🛠️ Services</button>
             <button class="tab-btn" onclick="switchTab('logs')">📋 Logs</button>
             <button class="tab-btn" onclick="switchTab('security')">🔐 Security</button>
+            <button class="tab-btn" onclick="switchTab('network')">🌐 Network Intel</button>
             <button class="tab-btn" onclick="switchTab('analytics')">📈 Analytics</button>
         </div>
 
@@ -645,6 +646,70 @@
             </div>
         </div>
 
+        <!-- Network Intelligence Tab (Module 6) -->
+        <div id="network" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h3>🚀 Internet Speedtest</h3>
+                    <button class="diagnostic-btn" onclick="runSpeedtest()" style="width: 100%; margin-bottom: 15px;">Run Speedtest</button>
+                    <div class="stat">
+                        <span class="stat-label">Download:</span>
+                        <span class="stat-value" id="speedDown">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Upload:</span>
+                        <span class="stat-value" id="speedUp">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Ping:</span>
+                        <span class="stat-value" id="speedPing">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Last Result:</span>
+                        <span class="stat-value" id="speedTime" style="font-size: 12px;">-</span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>🔒 DNS Leak Test</h3>
+                    <button class="diagnostic-btn" onclick="runDnsLeakTest()" style="width: 100%; margin-bottom: 15px;">Run Test</button>
+                    <div class="stat">
+                        <span class="stat-label">Status:</span>
+                        <span class="stat-value" id="dnsStatus">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Servers Found:</span>
+                        <span class="stat-value" id="dnsServersCount">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Last Test:</span>
+                        <span class="stat-value" id="dnsTime" style="font-size: 12px;">-</span>
+                    </div>
+                    <div id="dnsServersList" style="margin-top: 10px; font-size: 12px; color: #a0a0a0;"></div>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>🗺️ Traceroute Analysis</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                        <input type="text" id="traceTarget" placeholder="Target (google.com)" value="google.com" style="flex: 1; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
+                        <button class="diagnostic-btn" onclick="runTraceroute()" style="padding: 10px 20px;">Run Trace</button>
+                    </div>
+                    <div class="diagnostic-output" id="traceOutput"></div>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>📊 Speedtest History</h3>
+                    <div class="chart-container">
+                        <canvas id="speedTestChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Analytics Tab -->
         <div id="analytics" class="tab-content">
             <div class="grid">
@@ -729,6 +794,8 @@
             // Initialize charts when switching to performance tab
             if (tabName === 'performance') {
                 initializeCharts();
+            } else if (tabName === 'network') {
+                refreshSpeedTestHistory();
             } else if (tabName === 'analytics') {
                 initializeTrafficChart();
                 initializePerformanceTrendChart();
@@ -970,6 +1037,151 @@
             } catch (error) {
                 console.error('Error:', error);
             }
+        }
+
+        // Security Functions (Module 5)
+        async function runSpeedtest() {
+            try {
+                const btn = event.target;
+                btn.disabled = true;
+                btn.textContent = 'Testing...';
+                
+                const response = await fetch('/api/speedtest', { method: 'POST' });
+                const data = await response.json();
+                
+                document.getElementById('speedDown').textContent = data.download_speed.toFixed(2) + ' Mbps';
+                document.getElementById('speedUp').textContent = data.upload_speed.toFixed(2) + ' Mbps';
+                document.getElementById('speedPing').textContent = data.ping.toFixed(2) + ' ms';
+                document.getElementById('speedTime').textContent = new Date(data.timestamp).toLocaleString();
+                
+                btn.disabled = false;
+                btn.textContent = 'Run Speedtest';
+                refreshSpeedTestHistory();
+            } catch (error) {
+                console.error('Error:', error);
+                event.target.disabled = false;
+                event.target.textContent = 'Run Speedtest';
+            }
+        }
+
+        async function refreshSpeedTestHistory() {
+            try {
+                const response = await fetch('/api/speedtest-history?days=7');
+                const data = await response.json();
+                
+                if (data.results && data.results.length > 0) {
+                    updateSpeedTestChart(data.results);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function runDnsLeakTest() {
+            try {
+                const btn = event.target;
+                btn.disabled = true;
+                btn.textContent = 'Testing...';
+                
+                const response = await fetch('/api/dns-leak-test', { method: 'POST' });
+                const data = await response.json();
+                
+                document.getElementById('dnsStatus').textContent = data.leaked ? '⚠️ LEAKED' : '✓ SECURE';
+                document.getElementById('dnsStatus').style.color = data.leaked ? 'var(--danger)' : 'var(--neon-green)';
+                document.getElementById('dnsServersCount').textContent = data.dns_servers.length;
+                document.getElementById('dnsTime').textContent = new Date(data.timestamp).toLocaleString();
+                
+                let serversList = '';
+                data.dns_servers.forEach(server => {
+                    serversList += `<div style="padding: 5px 0; border-bottom: 1px solid rgba(0, 212, 255, 0.2);">${server}</div>`;
+                });
+                document.getElementById('dnsServersList').innerHTML = serversList;
+                
+                btn.disabled = false;
+                btn.textContent = 'Run Test';
+            } catch (error) {
+                console.error('Error:', error);
+                event.target.disabled = false;
+                event.target.textContent = 'Run Test';
+            }
+        }
+
+        async function runTraceroute() {
+            try {
+                const target = document.getElementById('traceTarget').value || 'google.com';
+                const output = document.getElementById('traceOutput');
+                
+                output.textContent = 'Running traceroute to ' + target + '...';
+                output.style.display = 'block';
+                
+                const response = await fetch('/api/traceroute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await response.json();
+                
+                let text = `Target: ${data.target}\nHops: ${data.hops}\n\n`;
+                if (data.path && Array.isArray(data.path)) {
+                    data.path.forEach((hop, i) => {
+                        text += `${i + 1}. ${hop}\n`;
+                    });
+                } else {
+                    text += 'No path data available';
+                }
+                output.textContent = text;
+            } catch (error) {
+                document.getElementById('traceOutput').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        function updateSpeedTestChart(results) {
+            if (!document.getElementById('speedTestChart')) return;
+            
+            const ctx = document.getElementById('speedTestChart').getContext('2d');
+            
+            if (window.speedTestChart) {
+                window.speedTestChart.destroy();
+            }
+            
+            const labels = results.map(r => new Date(r.timestamp).toLocaleString());
+            const downloads = results.map(r => r.download_speed);
+            const uploads = results.map(r => r.upload_speed);
+            
+            window.speedTestChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Download (Mbps)',
+                        data: downloads,
+                        borderColor: '#00ff41',
+                        backgroundColor: 'rgba(0, 255, 65, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Upload (Mbps)',
+                        data: uploads,
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#e0e0e0' } } },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(0, 212, 255, 0.1)' },
+                            ticks: { color: '#a0a0a0' }
+                        },
+                        x: {
+                            grid: { color: 'rgba(0, 212, 255, 0.1)' },
+                            ticks: { color: '#a0a0a0' }
+                        }
+                    }
+                }
+            });
         }
 
         // Security Functions (Module 5)

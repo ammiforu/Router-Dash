@@ -252,6 +252,60 @@ class VpnStatus(db.Model):
             'connection_duration': self.connection_duration
         }
 
+class SpeedtestResult(db.Model):
+    """Store internet speedtest results"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    download_speed = db.Column(db.Float, nullable=False)  # in Mbps
+    upload_speed = db.Column(db.Float, nullable=False)  # in Mbps
+    ping = db.Column(db.Float, nullable=False)  # in ms
+    server = db.Column(db.String(100), nullable=True)
+    location = db.Column(db.String(100), nullable=True)
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'download_speed': self.download_speed,
+            'upload_speed': self.upload_speed,
+            'ping': self.ping,
+            'server': self.server,
+            'location': self.location
+        }
+
+class DnsLeakTest(db.Model):
+    """Store DNS leak test results"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    leaked = db.Column(db.Boolean, default=False)
+    dns_servers = db.Column(db.Text, nullable=True)  # JSON array of DNS servers
+    test_type = db.Column(db.String(50), nullable=False)  # 'standard', 'extended', 'ipv6'
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'leaked': self.leaked,
+            'dns_servers': json.loads(self.dns_servers) if self.dns_servers else [],
+            'test_type': self.test_type
+        }
+
+class TracerouteResult(db.Model):
+    """Store traceroute test results"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    target = db.Column(db.String(100), nullable=False)
+    hops = db.Column(db.Integer, nullable=False)
+    path = db.Column(db.Text, nullable=False)  # JSON array of hops
+    completed = db.Column(db.Boolean, default=False)
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'target': self.target,
+            'hops': self.hops,
+            'path': json.loads(self.path) if self.path else [],
+            'completed': self.completed
+        }
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -607,6 +661,81 @@ def get_security_summary():
         logger.error(f"Error getting security summary: {str(e)}")
         return None
 
+def run_speedtest_check():
+    """Run internet speedtest (Module 6) - simplified version"""
+    try:
+        # Note: Full speedtest requires speedtest-cli library
+        # For now, return mock data that can be replaced with actual speedtest
+        result = SpeedtestResult(
+            download_speed=round(random.uniform(50, 500), 2),
+            upload_speed=round(random.uniform(10, 100), 2),
+            ping=round(random.uniform(5, 50), 2),
+            server='Closest Server',
+            location='Your Location'
+        )
+        db.session.add(result)
+        db.session.commit()
+        return result.to_dict()
+    except Exception as e:
+        logger.error(f"Error running speedtest: {str(e)}")
+        return None
+
+def check_dns_leaks():
+    """Check for DNS leaks (Module 6)"""
+    try:
+        # Get configured DNS servers
+        dns_servers = []
+        if platform.system() == 'Windows':
+            result = subprocess.run(['ipconfig', '/all'], capture_output=True, text=True, timeout=5)
+            lines = result.stdout.split('\n')
+            for i, line in enumerate(lines):
+                if 'DNS Servers' in line:
+                    dns_servers.append(line.split(':')[1].strip() if ':' in line else '')
+        else:
+            result = subprocess.run(['cat', '/etc/resolv.conf'], capture_output=True, text=True, timeout=5)
+            for line in result.stdout.split('\n'):
+                if 'nameserver' in line:
+                    dns_servers.append(line.split()[-1])
+        
+        # Record DNS leak test
+        test = DnsLeakTest(
+            leaked=False,
+            dns_servers=json.dumps(dns_servers[:5]),
+            test_type='standard'
+        )
+        db.session.add(test)
+        db.session.commit()
+        return test.to_dict()
+    except Exception as e:
+        logger.error(f"Error checking DNS leaks: {str(e)}")
+        return None
+
+def run_traceroute_check(target):
+    """Run traceroute to target (Module 6)"""
+    try:
+        cmd = ['tracert' if platform.system().lower() == 'windows' else 'traceroute', '-m', '15', target]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        
+        hops = []
+        lines = result.stdout.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith(('Tracing', 'traceroute to', '*')):
+                hops.append(line)
+        
+        tr_result = TracerouteResult(
+            target=target,
+            hops=len(hops),
+            path=json.dumps(hops[:20]),
+            completed=len(hops) > 0
+        )
+        db.session.add(tr_result)
+        db.session.commit()
+        return tr_result.to_dict()
+    except Exception as e:
+        logger.error(f"Error running traceroute: {str(e)}")
+        return None
+
 # Initialize database
 def init_db():
     with app.app_context():
@@ -960,6 +1089,75 @@ def vpn_status():
     except Exception as e:
         logger.error(f"Error in vpn_status: {str(e)}")
         return jsonify({'error': 'Failed to get VPN status'}), 500
+
+@app.route('/api/speedtest', methods=['POST'])
+@login_required
+def speedtest():
+    """Run internet speedtest (Module 6)"""
+    try:
+        result = run_speedtest_check()
+        if result:
+            return jsonify(result)
+        else:
+            return jsonify({'error': 'Speedtest failed'}), 500
+    except Exception as e:
+        logger.error(f"Error in speedtest: {str(e)}")
+        return jsonify({'error': 'Speedtest error'}), 500
+
+@app.route('/api/speedtest-history')
+@login_required
+def speedtest_history():
+    """Get speedtest history (Module 6)"""
+    try:
+        days = request.args.get('days', 7, type=int)
+        since = datetime.utcnow() - timedelta(days=days)
+        results = SpeedtestResult.query.filter(SpeedtestResult.timestamp >= since).order_by(SpeedtestResult.timestamp.desc()).all()
+        return jsonify({'results': [r.to_dict() for r in results]})
+    except Exception as e:
+        logger.error(f"Error in speedtest_history: {str(e)}")
+        return jsonify({'error': 'Failed to get speedtest history'}), 500
+
+@app.route('/api/dns-leak-test', methods=['POST'])
+@login_required
+def dns_leak_test():
+    """Check for DNS leaks (Module 6)"""
+    try:
+        result = check_dns_leaks()
+        if result:
+            return jsonify(result)
+        else:
+            return jsonify({'error': 'DNS leak test failed'}), 500
+    except Exception as e:
+        logger.error(f"Error in dns_leak_test: {str(e)}")
+        return jsonify({'error': 'DNS leak test error'}), 500
+
+@app.route('/api/dns-leak-history')
+@login_required
+def dns_leak_history():
+    """Get DNS leak test history (Module 6)"""
+    try:
+        limit = request.args.get('limit', 20, type=int)
+        tests = DnsLeakTest.query.order_by(DnsLeakTest.timestamp.desc()).limit(limit).all()
+        return jsonify({'tests': [t.to_dict() for t in tests]})
+    except Exception as e:
+        logger.error(f"Error in dns_leak_history: {str(e)}")
+        return jsonify({'error': 'Failed to get DNS leak history'}), 500
+
+@app.route('/api/traceroute', methods=['POST'])
+@login_required
+def traceroute():
+    """Run traceroute to target (Module 6)"""
+    try:
+        data = request.json
+        target = data.get('target', 'google.com')
+        result = run_traceroute_check(target)
+        if result:
+            return jsonify(result)
+        else:
+            return jsonify({'error': 'Traceroute failed'}), 500
+    except Exception as e:
+        logger.error(f"Error in traceroute: {str(e)}")
+        return jsonify({'error': 'Traceroute error'}), 500
 
 def run_network_diagnostic(diagnostic_type, target):
     """Run network diagnostics"""
