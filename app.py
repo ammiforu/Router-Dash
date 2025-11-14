@@ -531,75 +531,173 @@ def get_network_stats():
         return {'error': str(e)}, 500
 
 def get_connected_devices():
-    """Get list of connected devices with detailed information from router ARP table"""
+    """Get list of connected devices from router - includes online and offline devices"""
     try:
         router_ip = os.environ.get('ROUTER_IP', '192.168.1.1')
         router_user = os.environ.get('ROUTER_USER', 'admin')
         router_pass = os.environ.get('ROUTER_PASS', 'admin')
         
-        # Extract subnet from router IP (first 3 octets)
-        router_octets = router_ip.split('.')
-        expected_subnet = '.'.join(router_octets[:3])
-        
         devices = []
         
-        # Try to get real connected devices via SSH
+        # Try to get real devices via router REST API (GL-iNet or similar)
+        try:
+            import requests
+            import json
+            
+            # Try multiple known GL-iNet API endpoints
+            api_endpoints = [
+                f"http://{router_ip}/api/clients",  # GL-iNet v4
+                f"http://{router_ip}/api/status/clients",  # Alternative endpoint
+                f"http://{router_ip}/cgi-bin/luci/admin/network/clients",  # OpenWrt
+            ]
+            
+            for api_url in api_endpoints:
+                try:
+                    # Try with bearer token first
+                    headers = {'authorization': f'Bearer {router_pass}', 'Content-Type': 'application/json'}
+                    response = requests.get(api_url, headers=headers, timeout=2)
+                    
+                    if response.status_code == 401:
+                        # Try basic auth
+                        response = requests.get(api_url, auth=(router_user, router_pass), timeout=2)
+                    
+                    if response.status_code == 200:
+                        api_devices = response.json()
+                        
+                        # Handle different API response formats
+                        if isinstance(api_devices, dict) and 'data' in api_devices:
+                            api_devices = api_devices['data']
+                        
+                        if isinstance(api_devices, list):
+                            for dev in api_devices:
+                                # Extract device info based on common API response formats
+                                ip = dev.get('ip') or dev.get('ipaddr') or 'N/A'
+                                mac = dev.get('mac') or dev.get('hwaddr') or 'N/A'
+                                name = dev.get('hostname') or dev.get('name') or dev.get('device_name') or f"Device"
+                                connected = dev.get('online') or dev.get('connected') or dev.get('status') == 'Online'
+                                
+                                devices.append({
+                                    'ip': ip,
+                                    'mac': mac,
+                                    'name': name,
+                                    'connection_time': dev.get('connected_time', dev.get('lease_time', 'N/A')),
+                                    'data_used': dev.get('data_used', dev.get('traffic', 'N/A')),
+                                    'bandwidth': dev.get('bandwidth', dev.get('band', '2.4GHz')),
+                                    'type': dev.get('type', dev.get('device_type', 'WiFi')),
+                                    'status': 'Online' if connected else 'Offline'
+                                })
+                            
+                            if devices:
+                                logger.info(f"Retrieved {len(devices)} devices from router API: {api_url}")
+                                return devices
+                except requests.exceptions.RequestException as e:
+                    logger.debug(f"Router API request failed for {api_url}: {e}")
+                except Exception as parse_error:
+                    logger.debug(f"Error parsing API response from {api_url}: {parse_error}")
+        except ImportError:
+            logger.debug("Requests library not available for router API")
+        
+        # Try to get real devices via SSH
         try:
             import paramiko
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(router_ip, username=router_user, password=router_pass, timeout=2)
             
-            # Get ARP table from router
-            stdin, stdout, stderr = ssh.exec_command("arp -a")
-            arp_output = stdout.read().decode('utf-8', errors='ignore')
+            # Try to get clients list from router - try multiple sources
+            dhcp_leases = []
+            arp_devices = []
             
-            # Parse ARP table
-            for line in arp_output.strip().split('\n'):
-                if not line.strip() or 'Address' in line or '---' in line:
-                    continue
+            try:
+                # DHCP leases file
+                stdin, stdout, stderr = ssh.exec_command("cat /tmp/dhcp.leases 2>/dev/null || cat /var/lib/dnsmasq/dnsmasq.leases 2>/dev/null")
+                dhcp_output = stdout.read().decode('utf-8', errors='ignore')
                 
-                parts = line.split()
-                if len(parts) >= 2:
-                    try:
-                        device_ip = parts[0].replace('?', '').strip()
-                        device_mac = parts[1] if len(parts) > 1 else 'Unknown'
-                        
-                        if device_ip and device_ip != 'Address' and ':' in device_mac:
-                            # Get device name via SSH
-                            name_cmd = f"nslookup {device_ip} | grep name | awk '{{print $NF}}' | sed 's/.$//' 2>/dev/null || echo 'Device'"
-                            stdin2, stdout2, stderr2 = ssh.exec_command(name_cmd)
-                            device_name = stdout2.read().decode('utf-8', errors='ignore').strip()
-                            device_name = device_name if device_name else f"Device {device_ip.split('.')[-1]}"
-                            
-                            devices.append({
-                                'ip': device_ip,
-                                'mac': device_mac,
-                                'name': device_name,
-                                'connection_time': 'Connected',
-                                'data_used': 'N/A',
-                                'bandwidth': 'WiFi',
-                                'type': '802.11ac',
-                                'status': 'Online'
-                            })
-                    except Exception as parse_error:
-                        logger.debug(f"Error parsing ARP entry: {parse_error}")
+                for line in dhcp_output.strip().split('\n'):
+                    if not line.strip():
                         continue
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        try:
+                            device_mac = parts[1]
+                            device_ip = parts[2]
+                            device_name = parts[3] if len(parts) > 3 and parts[3] != '*' else f"Device {device_ip.split('.')[-1]}"
+                            
+                            if ':' in device_mac and '.' in device_ip:
+                                dhcp_leases.append({
+                                    'ip': device_ip,
+                                    'mac': device_mac,
+                                    'name': device_name,
+                                    'connection_time': 'Connected via DHCP',
+                                    'data_used': 'N/A',
+                                    'bandwidth': 'Unknown',
+                                    'type': 'WiFi',
+                                    'status': 'Online'
+                                })
+                        except Exception:
+                            pass
+            except Exception as dhcp_error:
+                logger.debug(f"Error reading DHCP leases: {dhcp_error}")
+            
+            # Also get ARP table for currently online devices
+            try:
+                stdin, stdout, stderr = ssh.exec_command("arp -a 2>/dev/null || ip neigh 2>/dev/null")
+                arp_output = stdout.read().decode('utf-8', errors='ignore')
+                
+                for line in arp_output.strip().split('\n'):
+                    if not line.strip() or 'Address' in line:
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        try:
+                            device_ip = parts[0]
+                            device_mac = parts[1].replace('-', ':') if len(parts) > 1 else 'Unknown'
+                            
+                            if ':' in device_mac and '.' in device_ip and device_ip != router_ip:
+                                arp_devices.append({
+                                    'ip': device_ip,
+                                    'mac': device_mac
+                                })
+                        except Exception:
+                            pass
+            except Exception as arp_error:
+                logger.debug(f"Error reading ARP table: {arp_error}")
             
             ssh.close()
             
-            # Return real devices if we got any
+            # Combine DHCP leases (more reliable for all known devices) with ARP data
+            devices = dhcp_leases
+            
+            # Add online-only devices from ARP that aren't in DHCP
+            dhcp_macs = {d['mac'].lower() for d in dhcp_leases}
+            for arp_dev in arp_devices:
+                if arp_dev['mac'].lower() not in dhcp_macs:
+                    devices.append({
+                        'ip': arp_dev['ip'],
+                        'mac': arp_dev['mac'],
+                        'name': f"Device {arp_dev['ip'].split('.')[-1]}",
+                        'connection_time': 'Online (ARP)',
+                        'data_used': 'N/A',
+                        'bandwidth': 'Unknown',
+                        'type': 'Wired/WiFi',
+                        'status': 'Online'
+                    })
+            
             if devices:
-                logger.info(f"Retrieved {len(devices)} connected devices from router ARP table")
+                logger.info(f"Retrieved {len(devices)} devices from router SSH")
                 return devices
                 
         except ImportError:
-            logger.warning("Paramiko not available for SSH connection")
+            logger.debug("Paramiko not available for SSH")
         except Exception as ssh_error:
-            logger.warning(f"SSH connection failed, trying local ARP cache: {ssh_error}")
+            logger.debug(f"SSH connection failed: {ssh_error}")
         
         # Fallback: Get connected devices from local ARP cache (Windows/Linux)
         try:
+            # Extract subnet from router IP (first 3 octets)
+            router_octets = router_ip.split('.')
+            expected_subnet = '.'.join(router_octets[:3])
+            
             if platform.system().lower() == 'windows':
                 # Windows ARP cache
                 result = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=2)
