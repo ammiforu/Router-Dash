@@ -531,62 +531,150 @@ def get_network_stats():
         return {'error': str(e)}, 500
 
 def get_connected_devices():
-    """Get list of connected devices with detailed information"""
+    """Get list of connected devices with detailed information from router ARP table"""
     try:
-        import random
-        
-        # Generate realistic router-connected devices
-        device_names = [
-            'iPhone 13', 'Samsung Galaxy S21', 'iPad Pro', 'MacBook Pro',
-            'Dell Laptop', 'Smart TV', 'Amazon Echo', 'Philips Hue Light',
-            'Brother Printer', 'Google Nest', 'Roku Device', 'PS5 Console',
-            'Nintendo Switch', 'Alexa Device'  # 14 online devices
-        ]
-        
-        offline_devices = [
-            'Old Printer', 'iPad Mini', 'Apple Watch', 'Airpods',
-            'Fitness Band', 'Smart Lock', 'IP Camera', 'Router AP',
-            'Guest Device'  # 9 offline devices
-        ]
+        router_ip = os.environ.get('ROUTER_IP', '192.168.1.1')
+        router_user = os.environ.get('ROUTER_USER', 'admin')
+        router_pass = os.environ.get('ROUTER_PASS', 'admin')
         
         devices = []
         
-        # Add online devices (14)
-        for i, name in enumerate(device_names):
-            device_ip = f"192.168.8.{100 + i}"
-            device_mac = f"{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}"
-            connection_hours = random.randint(1, 168)
-            data_mb = random.randint(100, 5000)
-            bandwidth = random.choice(['2.4GHz', '5GHz', 'WiFi-6', 'Ethernet'])
+        # Try to get real connected devices via SSH
+        try:
+            import paramiko
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(router_ip, username=router_user, password=router_pass, timeout=2)
             
-            devices.append({
-                'ip': device_ip,
-                'mac': device_mac,
-                'name': name,
-                'connection_time': f"{connection_hours}h ago",
-                'data_used': f"{data_mb} MB",
-                'bandwidth': bandwidth,
-                'type': '802.11ac' if '5GHz' in bandwidth else ('WiFi-6' if 'WiFi-6' in bandwidth else '802.11n' if 'Ethernet' not in bandwidth else 'Wired'),
-                'status': 'Online'
-            })
-        
-        # Add offline devices (9)
-        for i, name in enumerate(offline_devices):
-            device_ip = f"192.168.8.{120 + i}"
-            device_mac = f"{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}"
-            disconnect_hours = random.randint(1, 720)
+            # Get ARP table from router
+            stdin, stdout, stderr = ssh.exec_command("arp -a")
+            arp_output = stdout.read().decode('utf-8', errors='ignore')
             
-            devices.append({
-                'ip': device_ip,
-                'mac': device_mac,
-                'name': name,
-                'connection_time': f"{disconnect_hours}h ago",
-                'data_used': 'N/A',
-                'bandwidth': 'Offline',
-                'type': 'Unknown',
-                'status': 'Offline'
-            })
+            # Parse ARP table
+            for line in arp_output.strip().split('\n'):
+                if not line.strip() or 'Address' in line or '---' in line:
+                    continue
+                
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        device_ip = parts[0].replace('?', '').strip()
+                        device_mac = parts[1] if len(parts) > 1 else 'Unknown'
+                        
+                        if device_ip and device_ip != 'Address' and ':' in device_mac:
+                            # Get device name via SSH
+                            name_cmd = f"nslookup {device_ip} | grep name | awk '{{print $NF}}' | sed 's/.$//' 2>/dev/null || echo 'Device'"
+                            stdin2, stdout2, stderr2 = ssh.exec_command(name_cmd)
+                            device_name = stdout2.read().decode('utf-8', errors='ignore').strip()
+                            device_name = device_name if device_name else f"Device {device_ip.split('.')[-1]}"
+                            
+                            devices.append({
+                                'ip': device_ip,
+                                'mac': device_mac,
+                                'name': device_name,
+                                'connection_time': 'Connected',
+                                'data_used': 'N/A',
+                                'bandwidth': 'WiFi',
+                                'type': '802.11ac',
+                                'status': 'Online'
+                            })
+                    except Exception as parse_error:
+                        logger.debug(f"Error parsing ARP entry: {parse_error}")
+                        continue
+            
+            ssh.close()
+            
+            # Return real devices if we got any
+            if devices:
+                logger.info(f"Retrieved {len(devices)} connected devices from router ARP table")
+                return devices
+                
+        except ImportError:
+            logger.warning("Paramiko not available for SSH connection")
+        except Exception as ssh_error:
+            logger.warning(f"SSH connection failed, trying local ARP cache: {ssh_error}")
         
+        # Fallback: Get connected devices from local ARP cache (Windows/Linux)
+        try:
+            if platform.system().lower() == 'windows':
+                # Windows ARP cache
+                result = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=2)
+                arp_output = result.stdout
+                
+                # Parse Windows ARP format
+                current_interface = None
+                for line in arp_output.strip().split('\n'):
+                    line = line.strip()
+                    
+                    # Skip empty lines and headers
+                    if not line or 'Interface' in line or 'Internet Address' in line or '---' in line:
+                        continue
+                    
+                    # Extract interface IP if line contains "Interface:"
+                    if 'Interface:' in line:
+                        current_interface = line.split()[-2] if len(line.split()) > 1 else None
+                        continue
+                    
+                    # Parse ARP entries (format: IP   MAC   Type)
+                    parts = line.split()
+                    if len(parts) >= 3 and '.' in parts[0]:
+                        try:
+                            device_ip = parts[0]
+                            device_mac = parts[1].replace('-', ':')  # Convert dashes to colons
+                            
+                            # Skip broadcast/multicast and router IP
+                            if device_ip != router_ip and not device_ip.endswith('.255') and ':' in device_mac:
+                                devices.append({
+                                    'ip': device_ip,
+                                    'mac': device_mac,
+                                    'name': f"Device {device_ip.split('.')[-1]}",
+                                    'connection_time': 'Connected',
+                                    'data_used': 'N/A',
+                                    'bandwidth': 'Network',
+                                    'type': 'Wired/WiFi',
+                                    'status': 'Online'
+                                })
+                        except Exception as parse_error:
+                            logger.debug(f"Error parsing Windows ARP entry: {parse_error}")
+                            continue
+            else:
+                # Linux ARP cache
+                result = subprocess.run(['arp', '-n'], capture_output=True, text=True, timeout=2)
+                arp_output = result.stdout
+                
+                for line in arp_output.strip().split('\n'):
+                    if not line.strip() or 'Address' in line or '---' in line:
+                        continue
+                    
+                    parts = line.split()
+                    if len(parts) >= 2 and '.' in parts[0]:
+                        try:
+                            device_ip = parts[0]
+                            device_mac = parts[2] if len(parts) > 2 else 'Unknown'
+                            
+                            if device_ip != router_ip and ':' in device_mac:
+                                devices.append({
+                                    'ip': device_ip,
+                                    'mac': device_mac,
+                                    'name': f"Device {device_ip.split('.')[-1]}",
+                                    'connection_time': 'Connected',
+                                    'data_used': 'N/A',
+                                    'bandwidth': 'Network',
+                                    'type': 'Wired/WiFi',
+                                    'status': 'Online'
+                                })
+                        except Exception as parse_error:
+                            logger.debug(f"Error parsing Linux ARP entry: {parse_error}")
+                            continue
+            
+            if devices:
+                logger.info(f"Retrieved {len(devices)} connected devices from local ARP cache")
+                return devices
+        except Exception as arp_error:
+            logger.warning(f"Failed to retrieve local ARP cache: {arp_error}")
+        
+        # If all methods fail, log and return empty list (no mock data)
+        logger.warning("Could not retrieve connected devices from router or local ARP cache")
         return devices
     except Exception as e:
         logger.error(f"Error getting connected devices: {str(e)}")
