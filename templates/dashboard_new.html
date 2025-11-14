@@ -582,10 +582,58 @@
         <!-- Analytics Tab -->
         <div id="analytics" class="tab-content">
             <div class="grid">
+                <div class="card">
+                    <h3>📊 Uptime Statistics</h3>
+                    <div class="stat">
+                        <span class="stat-label">Uptime %:</span>
+                        <span class="stat-value" id="uptimePercent">-</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="uptimeBar" style="width: 0%; background: var(--neon-green);"></div>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Online Time:</span>
+                        <span class="stat-value" id="onlineTime" style="font-size: 12px;">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Offline Time:</span>
+                        <span class="stat-value" id="offlineTime" style="font-size: 12px;">-</span>
+                    </div>
+                    <button class="diagnostic-btn" onclick="refreshUptimeStats()" style="width: 100%; margin-top: 15px;">Refresh</button>
+                </div>
+
+                <div class="card">
+                    <h3>⚡ Performance Trends</h3>
+                    <div class="stat">
+                        <span class="stat-label">CPU Avg:</span>
+                        <span class="stat-value" id="cpuTrendAvg">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">CPU Range:</span>
+                        <span class="stat-value" id="cpuTrendRange" style="font-size: 12px;">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Memory Avg:</span>
+                        <span class="stat-value" id="memTrendAvg">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Memory Range:</span>
+                        <span class="stat-value" id="memTrendRange" style="font-size: 12px;">-</span>
+                    </div>
+                    <button class="diagnostic-btn" onclick="refreshPerformanceTrends()" style="width: 100%; margin-top: 15px;">Refresh</button>
+                </div>
+
                 <div class="card" style="grid-column: 1 / -1;">
                     <h3>📈 Network Traffic History (24 Hours)</h3>
                     <div class="chart-container">
                         <canvas id="trafficChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>📉 Performance Trends (7 Days)</h3>
+                    <div class="chart-container">
+                        <canvas id="performanceTrendChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -598,7 +646,7 @@
     </div>
 
     <script>
-        let cpuChart, memChart, trafficChart;
+        let cpuChart, memChart, trafficChart, performanceTrendChart;
 
         // Tab switching
         function switchTab(tabName) {
@@ -617,6 +665,9 @@
                 initializeCharts();
             } else if (tabName === 'analytics') {
                 initializeTrafficChart();
+                initializePerformanceTrendChart();
+                refreshUptimeStats();
+                refreshPerformanceTrends();
             }
         }
 
@@ -816,6 +867,45 @@
             }
         }
 
+        // Uptime Statistics (Module 4)
+        async function refreshUptimeStats() {
+            try {
+                const response = await fetch('/api/uptime-stats?days=30');
+                const data = await response.json();
+                
+                document.getElementById('uptimePercent').textContent = data.uptime_percent.toFixed(2) + '%';
+                document.getElementById('uptimeBar').style.width = data.uptime_percent + '%';
+                
+                const onlineHours = Math.floor(data.online_seconds / 3600);
+                const offlineHours = Math.floor(data.offline_seconds / 3600);
+                
+                document.getElementById('onlineTime').textContent = onlineHours + 'h';
+                document.getElementById('offlineTime').textContent = offlineHours + 'h';
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // Performance Trends (Module 4)
+        async function refreshPerformanceTrends() {
+            try {
+                const response = await fetch('/api/performance-trends?days=7');
+                const data = await response.json();
+                
+                document.getElementById('cpuTrendAvg').textContent = data.cpu_avg.toFixed(1) + '%';
+                document.getElementById('cpuTrendRange').textContent = data.cpu_min.toFixed(1) + '% - ' + data.cpu_max.toFixed(1) + '%';
+                document.getElementById('memTrendAvg').textContent = data.memory_avg.toFixed(1) + '%';
+                document.getElementById('memTrendRange').textContent = data.memory_min.toFixed(1) + '% - ' + data.memory_max.toFixed(1) + '%';
+                
+                // Update performance trend chart if visible
+                if (document.getElementById('analytics').classList.contains('active')) {
+                    updatePerformanceTrendChart(data.snapshots);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
         // Charts
         function initializeCharts() {
             if (cpuChart) return;
@@ -923,6 +1013,65 @@
                     }
                 }
             });
+        }
+
+        function initializePerformanceTrendChart() {
+            if (performanceTrendChart) return;
+            
+            const ctx = document.getElementById('performanceTrendChart').getContext('2d');
+            performanceTrendChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'CPU Avg (%)',
+                        data: [],
+                        borderColor: '#00ff41',
+                        backgroundColor: 'rgba(0, 255, 65, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y'
+                    }, {
+                        label: 'Memory Avg (%)',
+                        data: [],
+                        borderColor: '#bd00ff',
+                        backgroundColor: 'rgba(189, 0, 255, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#e0e0e0' } } },
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 100,
+                            grid: { color: 'rgba(0, 212, 255, 0.1)' },
+                            ticks: { color: '#a0a0a0' }
+                        },
+                        x: {
+                            grid: { color: 'rgba(0, 212, 255, 0.1)' },
+                            ticks: { color: '#a0a0a0' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updatePerformanceTrendChart(snapshots) {
+            if (!performanceTrendChart) {
+                initializePerformanceTrendChart();
+            }
+            
+            const labels = snapshots.map(s => new Date(s.timestamp).toLocaleTimeString());
+            const cpuData = snapshots.map(s => s.cpu_avg);
+            const memData = snapshots.map(s => s.memory_avg);
+            
+            performanceTrendChart.data.labels = labels;
+            performanceTrendChart.data.datasets[0].data = cpuData;
+            performanceTrendChart.data.datasets[1].data = memData;
+            performanceTrendChart.update();
         }
 
         // Utility

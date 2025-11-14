@@ -156,6 +156,50 @@ class SystemLog(db.Model):
             'message': self.message
         }
 
+class UptimeRecord(db.Model):
+    """Track router uptime and downtime events"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), nullable=False)  # 'online', 'offline'
+    duration_seconds = db.Column(db.Integer, nullable=True)  # duration of the status
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'status': self.status,
+            'duration_seconds': self.duration_seconds
+        }
+
+class PerformanceSnapshot(db.Model):
+    """Store performance snapshots for historical analysis"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    cpu_avg = db.Column(db.Float, nullable=False)  # average CPU for the period
+    memory_avg = db.Column(db.Float, nullable=False)  # average memory for the period
+    network_bytes_sent = db.Column(db.Integer, nullable=False)
+    network_bytes_recv = db.Column(db.Integer, nullable=False)
+    connected_devices_count = db.Column(db.Integer, nullable=False)
+    period_minutes = db.Column(db.Integer, default=5)  # aggregation period in minutes
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'cpu_avg': self.cpu_avg,
+            'memory_avg': self.memory_avg,
+            'network_bytes_sent': self.network_bytes_sent,
+            'network_bytes_recv': self.network_bytes_recv,
+            'connected_devices_count': self.connected_devices_count,
+            'period_minutes': self.period_minutes
+        }
+
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'log_type': self.log_type,
+            'level': self.level,
+            'component': self.component,
+            'message': self.message
+        }
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -332,6 +376,85 @@ def add_system_log(log_type, level, component, message):
         db.session.commit()
     except Exception as e:
         logger.error(f"Error adding system log: {str(e)}")
+
+def record_uptime_status(status):
+    """Record uptime status for historical tracking"""
+    try:
+        record = UptimeRecord(status=status)
+        db.session.add(record)
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Error recording uptime status: {str(e)}")
+
+def create_performance_snapshot():
+    """Create a performance snapshot for historical analysis"""
+    try:
+        stats = get_network_stats()
+        devices = get_connected_devices()
+        
+        snapshot = PerformanceSnapshot(
+            cpu_avg=stats.get('cpu_usage', 0) if stats else 0,
+            memory_avg=stats.get('memory_usage', 0) if stats else 0,
+            network_bytes_sent=stats.get('bytes_sent', 0) if stats else 0,
+            network_bytes_recv=stats.get('bytes_recv', 0) if stats else 0,
+            connected_devices_count=len(devices)
+        )
+        db.session.add(snapshot)
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Error creating performance snapshot: {str(e)}")
+
+def get_uptime_statistics(days=30):
+    """Get uptime statistics for a period"""
+    try:
+        since = datetime.utcnow() - timedelta(days=days)
+        records = UptimeRecord.query.filter(UptimeRecord.timestamp >= since).order_by(UptimeRecord.timestamp).all()
+        
+        total_online = 0
+        total_offline = 0
+        for record in records:
+            if record.status == 'online':
+                total_online += record.duration_seconds or 0
+            else:
+                total_offline += record.duration_seconds or 0
+        
+        total = total_online + total_offline
+        uptime_percent = (total_online / total * 100) if total > 0 else 0
+        
+        return {
+            'uptime_percent': round(uptime_percent, 2),
+            'online_seconds': total_online,
+            'offline_seconds': total_offline,
+            'total_seconds': total
+        }
+    except Exception as e:
+        logger.error(f"Error getting uptime statistics: {str(e)}")
+        return None
+
+def get_performance_trends(days=7):
+    """Get performance trends for analysis"""
+    try:
+        since = datetime.utcnow() - timedelta(days=days)
+        snapshots = PerformanceSnapshot.query.filter(PerformanceSnapshot.timestamp >= since).order_by(PerformanceSnapshot.timestamp).all()
+        
+        if not snapshots:
+            return None
+        
+        cpu_values = [s.cpu_avg for s in snapshots]
+        memory_values = [s.memory_avg for s in snapshots]
+        
+        return {
+            'cpu_min': min(cpu_values) if cpu_values else 0,
+            'cpu_max': max(cpu_values) if cpu_values else 0,
+            'cpu_avg': sum(cpu_values) / len(cpu_values) if cpu_values else 0,
+            'memory_min': min(memory_values) if memory_values else 0,
+            'memory_max': max(memory_values) if memory_values else 0,
+            'memory_avg': sum(memory_values) / len(memory_values) if memory_values else 0,
+            'snapshots': [s.to_dict() for s in snapshots]
+        }
+    except Exception as e:
+        logger.error(f"Error getting performance trends: {str(e)}")
+        return None
 
 # Initialize database
 def init_db():
@@ -586,6 +709,49 @@ def log_event():
     except Exception as e:
         logger.error(f"Error in log_event: {str(e)}")
         return jsonify({'error': 'Failed to log event'}), 500
+
+@app.route('/api/uptime-stats')
+@login_required
+def uptime_stats():
+    """Get uptime statistics"""
+    try:
+        days = request.args.get('days', 30, type=int)
+        stats = get_uptime_statistics(days=days)
+        
+        if stats:
+            return jsonify(stats)
+        else:
+            return jsonify({'error': 'No uptime data'}), 404
+    except Exception as e:
+        logger.error(f"Error in uptime_stats: {str(e)}")
+        return jsonify({'error': 'Failed to get uptime stats'}), 500
+
+@app.route('/api/performance-trends')
+@login_required
+def performance_trends():
+    """Get performance trend data"""
+    try:
+        days = request.args.get('days', 7, type=int)
+        trends = get_performance_trends(days=days)
+        
+        if trends:
+            return jsonify(trends)
+        else:
+            return jsonify({'error': 'No trend data'}), 404
+    except Exception as e:
+        logger.error(f"Error in performance_trends: {str(e)}")
+        return jsonify({'error': 'Failed to get performance trends'}), 500
+
+@app.route('/api/performance-snapshot', methods=['POST'])
+@login_required
+def create_snapshot():
+    """Create a new performance snapshot"""
+    try:
+        create_performance_snapshot()
+        return jsonify({'status': 'snapshot_created'})
+    except Exception as e:
+        logger.error(f"Error in create_snapshot: {str(e)}")
+        return jsonify({'error': 'Failed to create snapshot'}), 500
 
 def run_network_diagnostic(diagnostic_type, target):
     """Run network diagnostics"""
