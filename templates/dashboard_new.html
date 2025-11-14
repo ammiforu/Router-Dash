@@ -567,14 +567,80 @@
 
         <!-- Security Tab -->
         <div id="security" class="tab-content">
-            <div class="card">
-                <h3>🔐 Security Event Log</h3>
-                <button class="diagnostic-btn" onclick="refreshSecurityLogs()" style="width: 100%; margin-bottom: 15px;">Refresh Logs</button>
-                <div class="security-log" id="securityLogList">
-                    <p style="color: #888; text-align: center;">Loading...</p>
+            <div class="grid">
+                <div class="card">
+                    <h3>🛡️ Security Status (Module 5)</h3>
+                    <div class="stat">
+                        <span class="stat-label">Status:</span>
+                        <span class="stat-value" id="securityStatus">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Failed Logins (24h):</span>
+                        <span class="stat-value" id="failedLogins">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Port Alerts (24h):</span>
+                        <span class="stat-value" id="portAlerts">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Critical Events (24h):</span>
+                        <span class="stat-value" id="criticalEvents">-</span>
+                    </div>
+                    <button class="diagnostic-btn" onclick="refreshSecurityStatus()" style="width: 100%; margin-top: 15px;">Refresh</button>
                 </div>
-                <div class="refresh-info">
-                    Last 50 events shown
+
+                <div class="card">
+                    <h3>🔌 VPN Status</h3>
+                    <div class="stat">
+                        <span class="stat-label">Connected:</span>
+                        <span class="stat-value" id="vpnConnected">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">VPN Name:</span>
+                        <span class="stat-value" id="vpnName" style="font-size: 12px;">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Remote IP:Port:</span>
+                        <span class="stat-value" id="vpnRemote" style="font-size: 12px;">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Encryption:</span>
+                        <span class="stat-value" id="vpnEncryption" style="font-size: 12px;">-</span>
+                    </div>
+                    <button class="diagnostic-btn" onclick="refreshVpnStatus()" style="width: 100%; margin-top: 15px;">Refresh</button>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>📋 Login History (Module 5)</h3>
+                    <button class="diagnostic-btn" onclick="refreshLoginHistory()" style="width: 100%; margin-bottom: 15px;">Refresh</button>
+                    <div class="security-log" id="loginHistoryList">
+                        <p style="color: #888; text-align: center;">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>⚠️ Port Scan Alerts (Module 5)</h3>
+                    <button class="diagnostic-btn" onclick="refreshPortScanAlerts()" style="width: 100%; margin-bottom: 15px;">Refresh</button>
+                    <div class="security-log" id="portScanAlertsList">
+                        <p style="color: #888; text-align: center;">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>🔐 Security Event Log</h3>
+                    <button class="diagnostic-btn" onclick="refreshSecurityLogs()" style="width: 100%; margin-bottom: 15px;">Refresh Logs</button>
+                    <div class="security-log" id="securityLogList">
+                        <p style="color: #888; text-align: center;">Loading...</p>
+                    </div>
+                    <div class="refresh-info">
+                        Last 50 events shown
+                    </div>
                 </div>
             </div>
         </div>
@@ -906,6 +972,92 @@
             }
         }
 
+        // Security Functions (Module 5)
+        async function refreshSecurityStatus() {
+            try {
+                const response = await fetch('/api/security-summary');
+                const data = await response.json();
+                
+                document.getElementById('securityStatus').textContent = data.security_status.toUpperCase();
+                document.getElementById('securityStatus').style.color = 
+                    data.security_status === 'good' ? 'var(--neon-green)' :
+                    data.security_status === 'warning' ? 'var(--warning)' : 'var(--danger)';
+                document.getElementById('failedLogins').textContent = data.failed_logins_24h;
+                document.getElementById('portAlerts').textContent = data.port_scan_alerts_24h;
+                document.getElementById('criticalEvents').textContent = data.critical_events_24h;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function refreshVpnStatus() {
+            try {
+                const response = await fetch('/api/vpn-status');
+                const data = await response.json();
+                
+                document.getElementById('vpnConnected').textContent = data.is_connected ? '✓ YES' : '✗ NO';
+                document.getElementById('vpnConnected').style.color = data.is_connected ? 'var(--neon-green)' : 'var(--danger)';
+                document.getElementById('vpnName').textContent = data.vpn_name || 'N/A';
+                document.getElementById('vpnRemote').textContent = data.remote_ip ? `${data.remote_ip}:${data.remote_port}` : 'N/A';
+                document.getElementById('vpnEncryption').textContent = data.encryption || 'N/A';
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function refreshLoginHistory() {
+            try {
+                const response = await fetch('/api/login-history?limit=50');
+                const data = await response.json();
+                
+                let html = '';
+                if (data.attempts.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No login history</p>';
+                } else {
+                    data.attempts.forEach(attempt => {
+                        const severity = attempt.success ? 'info' : 'critical';
+                        const status = attempt.success ? '✓ SUCCESS' : '✗ FAILED';
+                        html += `
+                            <div class="log-entry ${severity}">
+                                <div class="log-time">${new Date(attempt.timestamp).toLocaleString()}</div>
+                                <div class="log-event">${attempt.username} - ${status}</div>
+                                <div class="log-message">IP: ${attempt.source_ip}</div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('loginHistoryList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function refreshPortScanAlerts() {
+            try {
+                const response = await fetch('/api/port-scan-alerts?limit=50&days=7');
+                const data = await response.json();
+                
+                let html = '';
+                if (data.alerts.length === 0) {
+                    html = '<p style="color: #888; text-align: center;">No port scan alerts</p>';
+                } else {
+                    data.alerts.forEach(alert => {
+                        const severity = alert.severity;
+                        html += `
+                            <div class="log-entry ${severity}">
+                                <div class="log-time">${new Date(alert.timestamp).toLocaleString()}</div>
+                                <div class="log-event">${alert.severity.toUpperCase()}: Port ${alert.port}/${alert.protocol}</div>
+                                <div class="log-message">Source: ${alert.source_ip} | ${alert.description || 'Port access detected'}</div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('portScanAlertsList').innerHTML = html;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
         // Charts
         function initializeCharts() {
             if (cpuChart) return;
@@ -1100,6 +1252,10 @@
             refreshSecurityLogs();
             refreshServices();
             refreshSystemLogs();
+            refreshSecurityStatus();
+            refreshVpnStatus();
+            refreshLoginHistory();
+            refreshPortScanAlerts();
         });
     </script>
 </body>

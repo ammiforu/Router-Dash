@@ -192,12 +192,64 @@ class PerformanceSnapshot(db.Model):
             'period_minutes': self.period_minutes
         }
 
+class LoginAttempt(db.Model):
+    """Track login attempts for security auditing"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    username = db.Column(db.String(120), nullable=False)
+    source_ip = db.Column(db.String(15), nullable=False)
+    success = db.Column(db.Boolean, default=False)
+    user_agent = db.Column(db.String(500), nullable=True)
+    
+    def to_dict(self):
         return {
             'timestamp': self.timestamp.isoformat(),
-            'log_type': self.log_type,
-            'level': self.level,
-            'component': self.component,
-            'message': self.message
+            'username': self.username,
+            'source_ip': self.source_ip,
+            'success': self.success,
+            'user_agent': self.user_agent
+        }
+
+class PortScanAlert(db.Model):
+    """Track detected port scans and suspicious activity"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    source_ip = db.Column(db.String(15), nullable=False)
+    port = db.Column(db.Integer, nullable=False)
+    protocol = db.Column(db.String(10), nullable=False)  # 'tcp', 'udp'
+    severity = db.Column(db.String(20), nullable=False)  # 'low', 'medium', 'high', 'critical'
+    description = db.Column(db.Text, nullable=True)
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'source_ip': self.source_ip,
+            'port': self.port,
+            'protocol': self.protocol,
+            'severity': self.severity,
+            'description': self.description
+        }
+
+class VpnStatus(db.Model):
+    """Track VPN connection status"""
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    is_connected = db.Column(db.Boolean, default=False)
+    vpn_name = db.Column(db.String(100), nullable=True)
+    remote_ip = db.Column(db.String(15), nullable=True)
+    remote_port = db.Column(db.Integer, nullable=True)
+    encryption = db.Column(db.String(50), nullable=True)
+    connection_duration = db.Column(db.Integer, nullable=True)  # in seconds
+    
+    def to_dict(self):
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'is_connected': self.is_connected,
+            'vpn_name': self.vpn_name,
+            'remote_ip': self.remote_ip,
+            'remote_port': self.remote_port,
+            'encryption': self.encryption,
+            'connection_duration': self.connection_duration
         }
 
 @login_manager.user_loader
@@ -456,6 +508,105 @@ def get_performance_trends(days=7):
         logger.error(f"Error getting performance trends: {str(e)}")
         return None
 
+def record_login_attempt_security(username, source_ip, success, user_agent=None):
+    """Record login attempt for security auditing (Module 5)"""
+    try:
+        attempt = LoginAttempt(
+            username=username,
+            source_ip=source_ip,
+            success=success,
+            user_agent=user_agent
+        )
+        db.session.add(attempt)
+        db.session.commit()
+        
+        # Log failed attempts
+        if not success:
+            add_system_log(
+                log_type='security',
+                level='WARNING',
+                component='authentication',
+                message=f'Failed login attempt for user {username} from {source_ip}'
+            )
+    except Exception as e:
+        logger.error(f"Error recording login attempt: {str(e)}")
+
+def record_port_scan_alert(source_ip, port, protocol='tcp', severity='medium', description=None):
+    """Record detected port scan or suspicious port access (Module 5)"""
+    try:
+        alert = PortScanAlert(
+            source_ip=source_ip,
+            port=port,
+            protocol=protocol,
+            severity=severity,
+            description=description
+        )
+        db.session.add(alert)
+        db.session.commit()
+        
+        add_system_log(
+            log_type='security',
+            level='CRITICAL' if severity == 'critical' else 'WARNING',
+            component='port_security',
+            message=f'{severity.upper()} alert: Port {port}/{protocol} accessed from {source_ip}'
+        )
+    except Exception as e:
+        logger.error(f"Error recording port scan alert: {str(e)}")
+
+def get_vpn_status():
+    """Get current VPN connection status (Module 5)"""
+    try:
+        # Try to detect VPN on Windows
+        if platform.system() == 'Windows':
+            result = subprocess.run(['wmic', 'path', 'win32_networkadapterconfiguration', 'where', 'ServiceName="RasMiniport_.*"', 'get', 'Description'], 
+                                  capture_output=True, text=True, timeout=5)
+            is_connected = 'pptp' in result.stdout.lower() or 'vpn' in result.stdout.lower() or 'l2tp' in result.stdout.lower()
+        else:
+            # Unix-like systems
+            result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True, timeout=5)
+            is_connected = 'tun' in result.stdout or 'tap' in result.stdout
+        
+        status = VpnStatus(is_connected=is_connected)
+        db.session.add(status)
+        db.session.commit()
+        
+        return status.to_dict()
+    except Exception as e:
+        logger.error(f"Error getting VPN status: {str(e)}")
+        return {'is_connected': False, 'error': str(e)}
+
+def get_security_summary():
+    """Get security summary with failed logins, port alerts, etc. (Module 5)"""
+    try:
+        # Get failed login attempts in last 24 hours
+        since = datetime.utcnow() - timedelta(hours=24)
+        failed_logins = LoginAttempt.query.filter(
+            LoginAttempt.timestamp >= since,
+            LoginAttempt.success == False
+        ).count()
+        
+        # Get port scan alerts in last 24 hours
+        port_alerts = PortScanAlert.query.filter(
+            PortScanAlert.timestamp >= since
+        ).count()
+        
+        # Get critical security logs
+        critical_logs = SystemLog.query.filter(
+            SystemLog.timestamp >= since,
+            SystemLog.log_type == 'security',
+            SystemLog.level.in_(['WARNING', 'ERROR', 'CRITICAL'])
+        ).count()
+        
+        return {
+            'failed_logins_24h': failed_logins,
+            'port_scan_alerts_24h': port_alerts,
+            'critical_events_24h': critical_logs,
+            'security_status': 'good' if (failed_logins < 5 and port_alerts == 0) else 'warning' if failed_logins < 10 else 'critical'
+        }
+    except Exception as e:
+        logger.error(f"Error getting security summary: {str(e)}")
+        return None
+
 # Initialize database
 def init_db():
     with app.app_context():
@@ -495,11 +646,14 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
+        source_ip = request.remote_addr or 'unknown'
+        user_agent = request.headers.get('User-Agent', '')
         
         # Input validation
         if not username or not password:
             flash('Username and password are required', 'error')
             logger.warning("Login attempt with missing credentials")
+            record_login_attempt_security(username, source_ip, False, user_agent)
             return render_template('login.html')
         
         # Rate limiting check
@@ -507,6 +661,7 @@ def login():
         if not allowed:
             flash(error_msg, 'error')
             logger.warning(f"Rate limit exceeded for user: {username}")
+            record_login_attempt_security(username, source_ip, False, user_agent)
             return render_template('login.html')
         
         user = User.query.filter_by(username=username).first()
@@ -516,9 +671,11 @@ def login():
             session['start_time'] = datetime.utcnow().isoformat()
             session.permanent = False
             logger.info(f"User {username} logged in successfully")
+            record_login_attempt_security(username, source_ip, True, user_agent)
             return redirect(url_for('dashboard'))
         else:
             record_login_attempt(username)
+            record_login_attempt_security(username, source_ip, False, user_agent)
             flash('Invalid username or password', 'error')
             logger.warning(f"Failed login attempt for username: {username}")
     
@@ -752,6 +909,57 @@ def create_snapshot():
     except Exception as e:
         logger.error(f"Error in create_snapshot: {str(e)}")
         return jsonify({'error': 'Failed to create snapshot'}), 500
+
+@app.route('/api/security-summary')
+@login_required
+def security_summary():
+    """Get security summary (Module 5)"""
+    try:
+        summary = get_security_summary()
+        if summary:
+            return jsonify(summary)
+        else:
+            return jsonify({'error': 'Failed to get summary'}), 500
+    except Exception as e:
+        logger.error(f"Error in security_summary: {str(e)}")
+        return jsonify({'error': 'Failed to get security summary'}), 500
+
+@app.route('/api/login-history')
+@login_required
+def login_history():
+    """Get login attempt history (Module 5)"""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        attempts = LoginAttempt.query.order_by(LoginAttempt.timestamp.desc()).limit(limit).all()
+        return jsonify({'attempts': [a.to_dict() for a in attempts]})
+    except Exception as e:
+        logger.error(f"Error in login_history: {str(e)}")
+        return jsonify({'error': 'Failed to get login history'}), 500
+
+@app.route('/api/port-scan-alerts')
+@login_required
+def port_scan_alerts():
+    """Get port scan alerts (Module 5)"""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        days = request.args.get('days', 1, type=int)
+        since = datetime.utcnow() - timedelta(days=days)
+        alerts = PortScanAlert.query.filter(PortScanAlert.timestamp >= since).order_by(PortScanAlert.timestamp.desc()).limit(limit).all()
+        return jsonify({'alerts': [a.to_dict() for a in alerts]})
+    except Exception as e:
+        logger.error(f"Error in port_scan_alerts: {str(e)}")
+        return jsonify({'error': 'Failed to get port scan alerts'}), 500
+
+@app.route('/api/vpn-status')
+@login_required
+def vpn_status():
+    """Get VPN connection status (Module 5)"""
+    try:
+        status = get_vpn_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error in vpn_status: {str(e)}")
+        return jsonify({'error': 'Failed to get VPN status'}), 500
 
 def run_network_diagnostic(diagnostic_type, target):
     """Run network diagnostics"""
