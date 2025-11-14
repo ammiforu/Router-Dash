@@ -550,7 +550,7 @@ def get_service_health():
     services = []
     try:
         # Get process information
-        for proc in psutil.process_iter(['pid', 'name', 'status', 'memory_info', 'cpu_num']):
+        for proc in psutil.process_iter(['pid', 'name', 'status', 'memory_info']):
             try:
                 if proc.name() in ['python.exe', 'nginx', 'mysql', 'dnsmasq', 'hostapd']:
                     services.append({
@@ -731,11 +731,16 @@ def record_port_scan_alert(source_ip, port, protocol='tcp', severity='medium', d
 def get_vpn_status():
     """Get current VPN connection status (Module 5)"""
     try:
+        is_connected = False
+        
         # Try to detect VPN on Windows
         if platform.system() == 'Windows':
-            result = subprocess.run(['wmic', 'path', 'win32_networkadapterconfiguration', 'where', 'ServiceName="RasMiniport_.*"', 'get', 'Description'], 
-                                  capture_output=True, text=True, timeout=5)
-            is_connected = 'pptp' in result.stdout.lower() or 'vpn' in result.stdout.lower() or 'l2tp' in result.stdout.lower()
+            try:
+                # Check for VPN adapters using ipconfig
+                result = subprocess.run(['ipconfig'], capture_output=True, text=True, timeout=3)
+                is_connected = 'ppp' in result.stdout.lower() or 'vpn' in result.stdout.lower() or 'l2tp' in result.stdout.lower()
+            except Exception:
+                is_connected = False
         else:
             # Unix-like systems
             result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True, timeout=5)
