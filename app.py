@@ -457,7 +457,7 @@ def check_router_status():
         }
 
 def get_network_stats():
-    """Get system network statistics with fallback mock data"""
+    """Get system network statistics"""
     try:
         net_stats = psutil.net_io_counters()
         cpu_usage = psutil.cpu_percent(interval=0.5)
@@ -474,22 +474,11 @@ def get_network_stats():
             'memory_available': memory_info.available,
         }
     except Exception as e:
-        logger.warning(f"Error getting network stats: {str(e)}")
-        # Return mock data to keep dashboard functional
-        import random
-        return {
-            'bytes_sent': random.randint(1000000000, 5000000000),
-            'bytes_recv': random.randint(1000000000, 5000000000),
-            'packets_sent': random.randint(100000, 500000),
-            'packets_recv': random.randint(100000, 500000),
-            'cpu_usage': random.uniform(10, 60),
-            'memory_usage': random.uniform(20, 70),
-            'memory_total': 8589934592,  # 8GB
-            'memory_available': random.randint(2000000000, 4000000000),
-        }
+        logger.error(f"Error getting network stats: {str(e)}")
+        return {'error': str(e)}, 500
 
 def get_connected_devices():
-    """Get list of connected devices with fallback mock data"""
+    """Get list of connected devices"""
     try:
         devices = []
         if platform.system() == 'Windows':
@@ -506,15 +495,11 @@ def get_connected_devices():
                         })
         if devices:
             return devices[:50]
+        else:
+            return []  # Return empty list if no devices found
     except Exception as e:
-        logger.warning(f"Error getting connected devices: {str(e)}")
-    
-    # Return mock data if real data unavailable
-    return [
-        {'ip': '192.168.8.100', 'mac': '00:11:22:33:44:55', 'type': 'dynamic'},
-        {'ip': '192.168.8.101', 'mac': '00:11:22:33:44:56', 'type': 'dynamic'},
-        {'ip': '192.168.8.102', 'mac': '00:11:22:33:44:57', 'type': 'dynamic'},
-    ]
+        logger.error(f"Error getting connected devices: {str(e)}")
+        return {'error': str(e)}, 500
 
 def get_service_health():
     """Get system service health status"""
