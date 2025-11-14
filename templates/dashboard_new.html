@@ -1107,13 +1107,23 @@
                 const data = await response.json();
                 
                 document.getElementById('deviceCount').textContent = data.count;
+                let newDevicesHtml = '';
                 let html = '';
+                let newDeviceCount = 0;
                 
                 if (data.devices.length === 0) {
                     html = '<p style="color: #888; text-align: center;">No devices found</p>';
                 } else {
                     data.devices.forEach((device, idx) => {
                         const isOffline = device.status === 'Offline';
+                        const isBlocked = device.is_blocked || false;
+                        const isNew = device.is_new || false;
+                        
+                        if (isNew) {
+                            newDeviceCount++;
+                            newDevicesHtml += `<span style="display: inline-block; padding: 4px 8px; background: #ff6b6b; color: white; border-radius: 4px; font-size: 11px; font-weight: bold; margin: 2px;">🆕 ${device.name}</span> `;
+                        }
+                        
                         const iconMap = {
                             'WiFi-6': '📶',
                             '5GHz': '📡',
@@ -1124,18 +1134,28 @@
                         };
                         const icon = iconMap[device.bandwidth] || iconMap['default'];
                         const statusIcon = isOffline ? '❌' : '✅';
+                        const blockedIndicator = isBlocked ? '🚫 ' : '';
                         
                         html += `
-                            <div class="device-item ${isOffline ? 'offline' : ''}">
+                            <div class="device-item ${isOffline ? 'offline' : ''} ${isBlocked ? 'blocked' : ''}" style="opacity: ${isBlocked ? '0.6' : '1'}" draggable="true" ondragstart="dragDevice(event, '${device.mac}')" ondragover="allowDrop(event)" ondrop="blockDeviceDrop(event, '${device.mac}')">
                                 <div class="device-header">
                                     <div>
-                                        <div class="device-name">${statusIcon} ${device.name}</div>
+                                        <div class="device-name">
+                                            ${statusIcon} ${blockedIndicator}${device.name}
+                                            ${isNew ? '<span style="display: inline-block; padding: 2px 6px; background: #ff6b6b; color: white; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 8px;">NEW</span>' : ''}
+                                        </div>
                                         <div class="device-ip">${icon} ${device.ip}</div>
                                         <div class="device-mac">${device.mac}</div>
                                     </div>
-                                    <div>
-                                        <span class="bandwidth-badge">📶 ${device.bandwidth}</span>
-                                        <span class="status-badge">${device.status}</span>
+                                    <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                                            <span class="bandwidth-badge">📶 ${device.bandwidth}</span>
+                                            <span class="status-badge">${device.status}</span>
+                                        </div>
+                                        <div style="display: flex; gap: 4px; flex-direction: column;">
+                                            <button class="action-btn edit-btn" onclick="openEditModal('${device.mac}', '${device.name.replace(/'/g, "\\'")}', '${(device.device_type || '').replace(/'/g, "\\'")}')" title="Edit device name">✏️</button>
+                                            <button class="action-btn block-btn ${isBlocked ? 'blocked' : ''}" onclick="toggleBlockDevice('${device.mac}')" title="${isBlocked ? 'Unblock' : 'Block'} device">${isBlocked ? '🔓' : '🔒'}</button>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="device-details">
@@ -1159,6 +1179,13 @@
                             </div>
                         `;
                     });
+                }
+                
+                if (newDeviceCount > 0) {
+                    html = `<div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 12px; border-radius: 4px;">
+                        <strong>🆕 ${newDeviceCount} New Device${newDeviceCount > 1 ? 's' : ''} Discovered:</strong>
+                        <div style="margin-top: 8px;">${newDevicesHtml}</div>
+                    </div>` + html;
                 }
                 
                 document.getElementById('deviceList').innerHTML = html;
@@ -1923,6 +1950,140 @@
             return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
         }
 
+        // Device Management Functions
+        let currentEditDevice = null;
+
+        function openEditModal(mac, currentName, deviceType) {
+            currentEditDevice = mac;
+            document.getElementById('editDeviceMac').value = mac;
+            document.getElementById('editDeviceName').value = currentName;
+            document.getElementById('editDeviceType').value = deviceType || 'Unknown';
+            document.getElementById('editModal').style.display = 'block';
+            document.getElementById('editDeviceName').focus();
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').style.display = 'none';
+            currentEditDevice = null;
+        }
+
+        async function saveDeviceChanges() {
+            const mac = document.getElementById('editDeviceMac').value;
+            const customName = document.getElementById('editDeviceName').value.trim();
+            const deviceType = document.getElementById('editDeviceType').value.trim();
+
+            if (!customName) {
+                alert('Device name cannot be empty');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/device/${mac}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        custom_name: customName,
+                        device_type: deviceType
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                closeEditModal();
+                refreshDevices();
+                showNotification('Device updated successfully!', 'success');
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to update device: ' + error.message);
+            }
+        }
+
+        async function toggleBlockDevice(mac) {
+            try {
+                // Determine current block status from UI
+                const deviceItem = event.target.closest('.device-item');
+                const isCurrentlyBlocked = deviceItem.classList.contains('blocked');
+                const endpoint = isCurrentlyBlocked ? 'unblock' : 'block';
+
+                const response = await fetch(`/api/device/${mac}/${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                refreshDevices();
+                showNotification(`Device ${endpoint}ed successfully!`, 'success');
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to update device: ' + error.message);
+            }
+        }
+
+        function dragDevice(event, mac) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('deviceMac', mac);
+            event.target.style.opacity = '0.7';
+        }
+
+        function allowDrop(event) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+        }
+
+        async function blockDeviceDrop(event, targetMac) {
+            event.preventDefault();
+            const draggedMac = event.dataTransfer.getData('deviceMac');
+            
+            if (draggedMac && draggedMac !== targetMac) {
+                // Optional: could implement device pairing here
+                console.log(`Dragged ${draggedMac} onto ${targetMac}`);
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 12px 20px;
+                background: ${type === 'success' ? '#d4edda' : '#e2e3e5'};
+                color: ${type === 'success' ? '#155724' : '#383d41'};
+                border: 1px solid ${type === 'success' ? '#c3e6cb' : '#d6d8db'};
+                border-radius: 4px;
+                z-index: 10000;
+                animation: slideIn 0.3s ease-out;
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        // Close modal when clicking outside of it
+        window.onclick = function(event) {
+            const modal = document.getElementById('editModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+
+        // Allow Enter key to save in modal
+        document.addEventListener('keypress', function(event) {
+            if (event.key === 'Enter' && document.getElementById('editModal').style.display === 'block') {
+                saveDeviceChanges();
+            }
+        });
+
         // Auto-refresh
         setInterval(() => {
             refreshRouterStatus();
@@ -1965,5 +2126,111 @@
             refreshCommandHistory();
         });
     </script>
+
+    <!-- Edit Device Modal -->
+    <div id="editModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4);">
+        <div style="background-color: #1a1a2e; margin: auto; padding: 20px; border: 2px solid #00d4ff; border-radius: 10px; width: 90%; max-width: 500px; position: relative; top: 50%; transform: translateY(-50%); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);">
+            <h2 style="color: #00ff41; margin-bottom: 20px;">✏️ Edit Device</h2>
+            
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; color: #00d4ff; font-weight: bold; margin-bottom: 5px;">MAC Address</label>
+                <input id="editDeviceMac" type="text" readonly style="width: 100%; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; border-radius: 5px; color: #00ff41; font-family: monospace;">
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; color: #00d4ff; font-weight: bold; margin-bottom: 5px;">Device Name</label>
+                <input id="editDeviceName" type="text" placeholder="Enter device name" style="width: 100%; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid #00d4ff; border-radius: 5px; color: #e0e0e0;">
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; color: #00d4ff; font-weight: bold; margin-bottom: 5px;">Device Type</label>
+                <input id="editDeviceType" type="text" placeholder="e.g., Smartphone, Laptop, Smart TV" style="width: 100%; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid #00d4ff; border-radius: 5px; color: #e0e0e0;">
+            </div>
+            
+            <div style="display: flex; gap: 10px;">
+                <button onclick="saveDeviceChanges()" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #00ff41, #00d4ff); border: none; color: #1a1a2e; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;">Save Changes</button>
+                <button onclick="closeEditModal()" style="flex: 1; padding: 12px; background: rgba(0, 212, 255, 0.2); border: 2px solid #00d4ff; color: #00d4ff; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #00d4ff;
+            background: rgba(0, 212, 255, 0.1);
+            color: #00d4ff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            min-width: 40px;
+        }
+
+        .action-btn:hover {
+            background: rgba(0, 212, 255, 0.3);
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+        }
+
+        .edit-btn {
+            border-color: #00ff41;
+            color: #00ff41;
+            background: rgba(0, 255, 65, 0.1);
+        }
+
+        .edit-btn:hover {
+            background: rgba(0, 255, 65, 0.2);
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.4);
+        }
+
+        .block-btn {
+            border-color: #ffc107;
+            color: #ffc107;
+            background: rgba(255, 193, 7, 0.1);
+        }
+
+        .block-btn:hover {
+            background: rgba(255, 193, 7, 0.2);
+            box-shadow: 0 0 10px rgba(255, 193, 7, 0.4);
+        }
+
+        .block-btn.blocked {
+            border-color: #ff6b6b;
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+        }
+
+        .block-btn.blocked:hover {
+            background: rgba(255, 107, 107, 0.2);
+            box-shadow: 0 0 10px rgba(255, 107, 107, 0.4);
+        }
+
+        .device-item.blocked {
+            border-left-color: #ff6b6b;
+            background: linear-gradient(135deg, rgba(60, 30, 30, 0.8), rgba(70, 35, 35, 0.9));
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+    </style>
 </body>
 </html>

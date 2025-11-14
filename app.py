@@ -378,6 +378,31 @@ class CommandHistory(db.Model):
             'exit_code': self.exit_code
         }
 
+class ManagedDevice(db.Model):
+    """Store custom device names and blocking settings"""
+    id = db.Column(db.Integer, primary_key=True)
+    mac_address = db.Column(db.String(17), unique=True, nullable=False)
+    custom_name = db.Column(db.String(255), nullable=False)
+    is_blocked = db.Column(db.Boolean, default=False)
+    is_new = db.Column(db.Boolean, default=True)
+    first_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    device_type = db.Column(db.String(50), nullable=True)  # 'phone', 'laptop', 'iot', etc
+    notes = db.Column(db.Text, nullable=True)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'mac_address': self.mac_address,
+            'custom_name': self.custom_name,
+            'is_blocked': self.is_blocked,
+            'is_new': self.is_new,
+            'first_seen': self.first_seen.isoformat(),
+            'last_seen': self.last_seen.isoformat(),
+            'device_type': self.device_type,
+            'notes': self.notes
+        }
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -684,6 +709,30 @@ def get_connected_devices():
                     })
             
             if devices:
+                # Enrich devices with custom names and blocking status from database
+                for device in devices:
+                    mac = device['mac'].lower()
+                    managed = ManagedDevice.query.filter_by(mac_address=mac).first()
+                    
+                    if managed:
+                        device['name'] = managed.custom_name
+                        device['is_blocked'] = managed.is_blocked
+                        device['is_new'] = False
+                        device['device_type'] = managed.device_type
+                        managed.last_seen = datetime.utcnow()
+                    else:
+                        # New device - create record and mark as new
+                        device['is_new'] = True
+                        device['is_blocked'] = False
+                        new_device = ManagedDevice(
+                            mac_address=mac,
+                            custom_name=device.get('name', f"Device {device['ip'].split('.')[-1]}"),
+                            is_new=True,
+                            device_type=device.get('type', 'Unknown')
+                        )
+                        db.session.add(new_device)
+                
+                db.session.commit()
                 logger.info(f"Retrieved {len(devices)} devices from router SSH")
                 return devices
                 
@@ -1516,6 +1565,95 @@ def connected_devices():
     except Exception as e:
         logger.error(f"Error in connected_devices: {str(e)}")
         return jsonify({'error': 'Failed to get connected devices'}), 500
+
+@app.route('/api/device/<mac_address>', methods=['PUT'])
+@login_required
+def update_device(mac_address):
+    """Update device name, blocking status, and type"""
+    try:
+        data = request.get_json()
+        mac = mac_address.lower()
+        
+        device = ManagedDevice.query.filter_by(mac_address=mac).first()
+        if not device:
+            return jsonify({'error': 'Device not found'}), 404
+        
+        # Update fields
+        if 'custom_name' in data:
+            device.custom_name = data['custom_name']
+        if 'is_blocked' in data:
+            device.is_blocked = data['is_blocked']
+        if 'device_type' in data:
+            device.device_type = data['device_type']
+        if 'notes' in data:
+            device.notes = data['notes']
+        if 'is_new' in data:
+            device.is_new = data['is_new']
+        
+        device.last_seen = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"Updated device {mac}: {device.custom_name}")
+        return jsonify(device.to_dict()), 200
+        
+    except Exception as e:
+        logger.error(f"Error updating device: {str(e)}")
+        return jsonify({'error': 'Failed to update device'}), 500
+
+@app.route('/api/devices/new', methods=['GET'])
+@login_required
+def get_new_devices():
+    """Get newly discovered devices"""
+    try:
+        new_devices = ManagedDevice.query.filter_by(is_new=True).all()
+        return jsonify({'devices': [d.to_dict() for d in new_devices], 'count': len(new_devices)}), 200
+    except Exception as e:
+        logger.error(f"Error getting new devices: {str(e)}")
+        return jsonify({'error': 'Failed to get new devices'}), 500
+
+@app.route('/api/device/<mac_address>/block', methods=['POST'])
+@login_required
+def block_device(mac_address):
+    """Block a device"""
+    try:
+        mac = mac_address.lower()
+        device = ManagedDevice.query.filter_by(mac_address=mac).first()
+        
+        if not device:
+            return jsonify({'error': 'Device not found'}), 404
+        
+        device.is_blocked = True
+        device.last_seen = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"Blocked device: {device.custom_name} ({mac})")
+        return jsonify(device.to_dict()), 200
+        
+    except Exception as e:
+        logger.error(f"Error blocking device: {str(e)}")
+        return jsonify({'error': 'Failed to block device'}), 500
+
+@app.route('/api/device/<mac_address>/unblock', methods=['POST'])
+@login_required
+def unblock_device(mac_address):
+    """Unblock a device"""
+    try:
+        mac = mac_address.lower()
+        device = ManagedDevice.query.filter_by(mac_address=mac).first()
+        
+        if not device:
+            return jsonify({'error': 'Device not found'}), 404
+        
+        device.is_blocked = False
+        device.last_seen = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"Unblocked device: {device.custom_name} ({mac})")
+        return jsonify(device.to_dict()), 200
+        
+    except Exception as e:
+        logger.error(f"Error unblocking device: {str(e)}")
+        return jsonify({'error': 'Failed to unblock device'}), 500
 
 @app.route('/api/diagnostics', methods=['POST'])
 @login_required
