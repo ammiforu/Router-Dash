@@ -537,6 +537,10 @@ def get_connected_devices():
         router_user = os.environ.get('ROUTER_USER', 'admin')
         router_pass = os.environ.get('ROUTER_PASS', 'admin')
         
+        # Extract subnet from router IP (first 3 octets)
+        router_octets = router_ip.split('.')
+        expected_subnet = '.'.join(router_octets[:3])
+        
         devices = []
         
         # Try to get real connected devices via SSH
@@ -621,17 +625,25 @@ def get_connected_devices():
                         try:
                             device_ip = parts[0]
                             device_mac = parts[1].replace('-', ':')  # Convert dashes to colons
-                            ip_octets = [int(x) for x in device_ip.split('.')]
                             
-                            # Filter criteria:
-                            # 1. Skip router IP
-                            # 2. Skip broadcast (.255)
-                            # 3. Skip multicast (224.0.0.0 to 239.255.255.255)
-                            # 4. Skip reserved ranges (0.x, 127.x, 169.254.x - link-local)
-                            # 5. Skip localhost (127.0.0.x)
+                            # Validate IP address
+                            try:
+                                ip_octets = [int(x) for x in device_ip.split('.')]
+                                if len(ip_octets) != 4 or any(x < 0 or x > 255 for x in ip_octets):
+                                    continue  # Invalid IP format
+                            except ValueError:
+                                continue  # Not a valid IP
+                            
+                            # Check if IP is in the same subnet as router
+                            device_subnet = '.'.join(device_ip.split('.')[:3])
+                            if device_subnet != expected_subnet:
+                                logger.debug(f"Device {device_ip} not in expected subnet {expected_subnet}")
+                                continue
+                            
+                            # Additional filters
                             is_multicast = ip_octets[0] >= 224 and ip_octets[0] <= 239
                             is_reserved = ip_octets[0] == 0 or ip_octets[0] == 127 or ip_octets[0] == 169
-                            is_broadcast = device_ip.endswith('.255') or device_ip.endswith('.0')
+                            is_broadcast = device_ip.endswith('.255') or device_ip.endswith('.0') or device_ip.endswith('.254')
                             is_router = device_ip == router_ip
                             is_valid_mac = ':' in device_mac and device_mac.count(':') == 5
                             
@@ -663,12 +675,25 @@ def get_connected_devices():
                         try:
                             device_ip = parts[0]
                             device_mac = parts[2] if len(parts) > 2 else 'Unknown'
-                            ip_octets = [int(x) for x in device_ip.split('.')]
                             
-                            # Same filtering as Windows
+                            # Validate IP address
+                            try:
+                                ip_octets = [int(x) for x in device_ip.split('.')]
+                                if len(ip_octets) != 4 or any(x < 0 or x > 255 for x in ip_octets):
+                                    continue  # Invalid IP format
+                            except ValueError:
+                                continue  # Not a valid IP
+                            
+                            # Check if IP is in the same subnet as router
+                            device_subnet = '.'.join(device_ip.split('.')[:3])
+                            if device_subnet != expected_subnet:
+                                logger.debug(f"Device {device_ip} not in expected subnet {expected_subnet}")
+                                continue
+                            
+                            # Additional filters
                             is_multicast = ip_octets[0] >= 224 and ip_octets[0] <= 239
                             is_reserved = ip_octets[0] == 0 or ip_octets[0] == 127 or ip_octets[0] == 169
-                            is_broadcast = device_ip.endswith('.255') or device_ip.endswith('.0')
+                            is_broadcast = device_ip.endswith('.255') or device_ip.endswith('.0') or device_ip.endswith('.254')
                             is_router = device_ip == router_ip
                             is_valid_mac = ':' in device_mac and device_mac.count(':') == 5
                             
