@@ -501,6 +501,50 @@ def get_connected_devices():
         logger.error(f"Error getting connected devices: {str(e)}")
         return {'error': str(e)}, 500
 
+def get_top_processes(limit=10):
+    """Get top processes by CPU and memory usage"""
+    try:
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+            try:
+                proc_info = proc.as_dict(attrs=['pid', 'name', 'cpu_percent', 'memory_percent', 'status'])
+                if proc_info.get('cpu_percent') is not None or proc_info.get('memory_percent') is not None:
+                    processes.append(proc_info)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        
+        # Sort by CPU and get top processes
+        top_cpu = sorted(processes, key=lambda x: x.get('cpu_percent', 0) or 0, reverse=True)[:limit]
+        
+        # Sort by memory and get top processes
+        top_memory = sorted(processes, key=lambda x: x.get('memory_percent', 0) or 0, reverse=True)[:limit]
+        
+        return {
+            'top_cpu': [
+                {
+                    'pid': p['pid'],
+                    'name': p['name'],
+                    'cpu_percent': p.get('cpu_percent', 0) or 0,
+                    'memory_percent': p.get('memory_percent', 0) or 0,
+                    'status': p.get('status', 'unknown')
+                }
+                for p in top_cpu
+            ],
+            'top_memory': [
+                {
+                    'pid': p['pid'],
+                    'name': p['name'],
+                    'cpu_percent': p.get('cpu_percent', 0) or 0,
+                    'memory_percent': p.get('memory_percent', 0) or 0,
+                    'status': p.get('status', 'unknown')
+                }
+                for p in top_memory
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting top processes: {str(e)}")
+        return {'error': str(e)}, 500
+
 def get_service_health():
     """Get system service health status"""
     services = []
@@ -1084,6 +1128,18 @@ def network_stats():
         return jsonify({'error': 'Unable to get stats'}), 500
     except Exception as e:
         logger.error(f"Error in network_stats: {str(e)}")
+        return jsonify({'error': 'Failed to get network stats'}), 500
+
+@app.route('/api/top-processes')
+@login_required
+def top_processes():
+    """Get top CPU and memory consuming processes"""
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        result = get_top_processes(limit)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in top_processes: {str(e)}")
         return jsonify({'error': 'Failed to get network stats'}), 500
 
 @app.route('/api/connected-devices')

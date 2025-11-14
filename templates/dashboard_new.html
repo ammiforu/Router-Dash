@@ -454,6 +454,39 @@
                     <div class="progress-bar">
                         <div class="progress-fill" id="memBar" style="width: 0%"></div>
                     </div>
+                    
+                    <!-- Top CPU Tasks -->
+                    <div style="margin-top: 20px; border-top: 2px solid #0ff; padding-top: 15px;">
+                        <h4 style="color: #0ff; margin: 0 0 10px 0; cursor: pointer;" onclick="toggleTopProcesses('cpu')">
+                            🔥 Top CPU Tasks <span id="cpuArrow">▼</span>
+                        </h4>
+                        <div id="topCpuList" style="display: none; max-height: 200px; overflow-y: auto;">
+                            <table style="width: 100%; font-size: 12px; color: #fff;">
+                                <tr style="border-bottom: 1px solid #0ff;">
+                                    <th style="text-align: left; padding: 5px;">Process</th>
+                                    <th style="text-align: right; padding: 5px;">CPU %</th>
+                                </tr>
+                                <tbody id="topCpuTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Top Memory Tasks -->
+                    <div style="margin-top: 15px; border-top: 2px solid #0f0; padding-top: 15px;">
+                        <h4 style="color: #0f0; margin: 0 0 10px 0; cursor: pointer;" onclick="toggleTopProcesses('memory')">
+                            💾 Top Memory Tasks <span id="memArrow">▼</span>
+                        </h4>
+                        <div id="topMemoryList" style="display: none; max-height: 200px; overflow-y: auto;">
+                            <table style="width: 100%; font-size: 12px; color: #fff;">
+                                <tr style="border-bottom: 1px solid #0f0;">
+                                    <th style="text-align: left; padding: 5px;">Process</th>
+                                    <th style="text-align: right; padding: 5px;">RAM %</th>
+                                </tr>
+                                <tbody id="topMemoryTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
                     <button class="diagnostic-btn" onclick="refreshStats()" style="width: 100%; margin-top: 15px;">Refresh Stats</button>
                 </div>
 
@@ -903,10 +936,66 @@
                 document.getElementById('packetsSent').textContent = data.packets_sent.toLocaleString();
                 document.getElementById('packetsRecv').textContent = data.packets_recv.toLocaleString();
                 document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+                
+                // Also refresh top processes
+                await refreshTopProcesses();
             } catch (error) {
                 console.error('Error:', error);
             }
         }
+        
+        // Toggle top processes visibility
+        function toggleTopProcesses(type) {
+            const listId = type === 'cpu' ? 'topCpuList' : 'topMemoryList';
+            const arrowId = type === 'cpu' ? 'cpuArrow' : 'memArrow';
+            const list = document.getElementById(listId);
+            const arrow = document.getElementById(arrowId);
+            
+            if (list.style.display === 'none') {
+                list.style.display = 'block';
+                arrow.textContent = '▲';
+            } else {
+                list.style.display = 'none';
+                arrow.textContent = '▼';
+            }
+        }
+        
+        // Fetch and display top processes
+        async function refreshTopProcesses() {
+            try {
+                const response = await fetch('/api/top-processes?limit=10');
+                const data = await response.json();
+                
+                // Update top CPU table
+                let cpuHtml = '';
+                data.top_cpu.forEach((proc, idx) => {
+                    const color = idx === 0 ? 'color: #ff0;' : '';
+                    cpuHtml += `
+                        <tr style="border-bottom: 1px solid #0ff; ${color}">
+                            <td style="padding: 5px; text-align: left;" title="${proc.name} (PID: ${proc.pid})">${proc.name.substring(0, 20)}</td>
+                            <td style="padding: 5px; text-align: right;">${proc.cpu_percent.toFixed(1)}%</td>
+                        </tr>
+                    `;
+                });
+                document.getElementById('topCpuTable').innerHTML = cpuHtml;
+                
+                // Update top Memory table
+                let memHtml = '';
+                data.top_memory.forEach((proc, idx) => {
+                    const color = idx === 0 ? 'color: #0f0;' : '';
+                    memHtml += `
+                        <tr style="border-bottom: 1px solid #0f0; ${color}">
+                            <td style="padding: 5px; text-align: left;" title="${proc.name} (PID: ${proc.pid})">${proc.name.substring(0, 20)}</td>
+                            <td style="padding: 5px; text-align: right;">${proc.memory_percent.toFixed(2)}%</td>
+                        </tr>
+                    `;
+                });
+                document.getElementById('topMemoryTable').innerHTML = memHtml;
+            } catch (error) {
+                console.error('Error fetching top processes:', error);
+            }
+        }
+
 
         // Connected Devices
         async function refreshDevices() {
