@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Monitor - Router Dashboard PRO</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --neon-blue: #00d4ff;
+            --neon-green: #00ff41;
+            --dark-bg: #0a0a1a;
+            --card-bg: #1a1a2e;
+            --border-color: #00d4ff;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(0, 212, 255, 0.1);
+            border: 2px solid var(--neon-blue);
+            border-radius: 15px;
+        }
+
+        .header h1 {
+            color: var(--neon-blue);
+            font-size: 2.5em;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+            margin-bottom: 10px;
+        }
+
+        .header .subtitle {
+            color: var(--neon-green);
+            font-size: 1.2em;
+        }
+
+        .back-button {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+
+        .back-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 212, 255, 0.5);
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: rgba(26, 26, 46, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group label {
+            color: var(--neon-blue);
+            font-weight: bold;
+        }
+
+        .control-group input, .control-group select {
+            padding: 9px 14px;
+            background: #062633;
+            border: 1px solid rgba(0,212,255,0.5);
+            border-radius: 6px;
+            color: #e8fbff;
+            font-size: 14px;
+            box-shadow: inset 0 0 6px rgba(0,212,255,0.25);
+            transition: background 0.25s, border-color 0.25s, box-shadow 0.25s;
+        }
+        .control-group input::placeholder {
+            color: #7ab9c8;
+        }
+        .control-group input:focus, .control-group select:focus {
+            outline: none;
+            background: #083546;
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 0 2px rgba(0,212,255,0.35), inset 0 0 8px rgba(0,212,255,0.4);
+        }
+        /* Dropdown option styling (supported in most modern browsers) */
+        .control-group select option {
+            background: #05202b;
+            color: #e6fbff;
+        }
+        .control-group select option:hover, .control-group select option:focus, .control-group select option:checked {
+            background: #0b3d4d;
+            color: #ffffff;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 212, 255, 0.5);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #00ff41, #00cc33);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff6b6b, #cc5555);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #888, #666);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(26, 26, 46, 0.8);
+            border: 2px solid var(--neon-blue);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        .stat-card .label {
+            color: var(--neon-blue);
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            color: var(--neon-green);
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .traffic-table-container {
+            background: rgba(26, 26, 46, 0.8);
+            border: 2px solid var(--neon-blue);
+            border-radius: 10px;
+            padding: 20px;
+            overflow-x: auto;
+            margin-bottom: 20px;
+        }
+
+        .traffic-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .traffic-table th {
+            background: linear-gradient(135deg, rgba(0,212,255,0.25), rgba(0,180,255,0.15));
+            color: #e6fbff;
+            padding: 12px;
+            text-align: left;
+            border-bottom: 2px solid var(--neon-blue);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .traffic-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.15);
+            color: #d8f7ff;
+            font-size: 13px;
+        }
+
+        .traffic-table tbody tr:nth-child(even) {
+            background: rgba(255,255,255,0.025);
+        }
+
+        .traffic-table tr:hover {
+            background: rgba(0, 212, 255, 0.12);
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .status-success {
+            background: rgba(0, 255, 65, 0.2);
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+        }
+
+        .status-warning {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+            border: 1px solid #ffc107;
+        }
+
+        .status-error {
+            background: rgba(255, 107, 107, 0.2);
+            color: #ff6b6b;
+            border: 1px solid #ff6b6b;
+        }
+
+        .status-info {
+            background: rgba(0, 212, 255, 0.2);
+            color: var(--neon-blue);
+            border: 1px solid var(--neon-blue);
+        }
+
+        .ip-badge {
+            font-family: 'Courier New', monospace;
+            padding: 4px 8px;
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid var(--neon-blue);
+            border-radius: 5px;
+        }
+
+        .ip-external {
+            border-color: #ff6b6b;
+            color: #ff6b6b;
+        }
+
+        .ip-internal {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+        }
+
+        .method-badge {
+            font-weight: bold;
+            font-size: 0.85em;
+        }
+
+        .details-btn {
+            padding: 4px 12px;
+            background: rgba(0, 212, 255, 0.2);
+            color: var(--neon-blue);
+            border: 1px solid var(--neon-blue);
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s;
+        }
+
+        .details-btn:hover {
+            background: rgba(0, 212, 255, 0.4);
+        }
+
+        .request-details {
+            display: none;
+            margin-top: 10px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-left: 3px solid var(--neon-green);
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        .request-details.show {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+            font-size: 1.2em;
+        }
+
+        .live-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: var(--neon-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+                box-shadow: 0 0 10px var(--neon-green);
+            }
+            50% {
+                opacity: 0.5;
+                box-shadow: 0 0 5px var(--neon-green);
+            }
+        }
+
+        .paused {
+            background: #888;
+            animation: none;
+        }
+
+        .chart-container {
+            background: rgba(26, 26, 46, 0.8);
+            border: 2px solid var(--neon-blue);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            color: var(--neon-blue);
+            font-size: 1.2em;
+            margin-bottom: 15px;
+        }
+
+        .issue-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            margin: 2px;
+            background: rgba(255, 107, 107, 0.2);
+            border: 1px solid #ff6b6b;
+            border-radius: 3px;
+            font-size: 0.8em;
+            color: #ff6b6b;
+        }
+
+        #autoScroll {
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-button">← Back to Dashboard</a>
+
+    <div class="header">
+        <h1>🚦 Traffic Monitor</h1>
+        <div class="subtitle">tetalas.duckdns.org - Real-Time Request Tracking</div>
+    </div>
+
+    <!-- Statistics Dashboard -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="label">Total Requests</div>
+            <div class="value" id="totalRequests">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Success Rate</div>
+            <div class="value" id="successRate">0%</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Avg Response Time</div>
+            <div class="value" id="avgResponseTime">0.000s</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Buffer Usage</div>
+            <div class="value" id="bufferUsage">0/500</div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <div class="control-group">
+            <span class="live-indicator" id="liveIndicator"></span>
+            <button class="btn btn-success" id="toggleLive" onclick="toggleLiveUpdates()">Pause Live</button>
+        </div>
+        
+        <div class="control-group">
+            <label for="filterPort">Port:</label>
+            <input type="text" id="filterPort" placeholder="e.g., 5000">
+        </div>
+        
+        <div class="control-group">
+            <label for="filterIP">IP:</label>
+            <input type="text" id="filterIP" placeholder="e.g., 192.168">
+        </div>
+        
+        <div class="control-group">
+            <label for="filterMethod">Method:</label>
+            <select id="filterMethod">
+                <option value="">All</option>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="filterStatus">Status:</label>
+            <select id="filterStatus">
+                <option value="">All</option>
+                <option value="2">2xx Success</option>
+                <option value="3">3xx Redirect</option>
+                <option value="4">4xx Client Error</option>
+                <option value="5">5xx Server Error</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="filterExternal"> External Only
+            </label>
+        </div>
+        
+        <button class="btn" onclick="applyFilters()">🔍 Apply Filters</button>
+        <button class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
+        <button class="btn btn-success" onclick="exportCSV()">📥 Export CSV</button>
+        <button class="btn btn-danger" onclick="clearLogs()">🗑️ Clear Logs</button>
+        
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="autoScroll" checked> Auto-scroll
+            </label>
+        </div>
+    </div>
+
+    <!-- Traffic Table -->
+    <div class="traffic-table-container">
+        <h2 class="chart-title">📊 Request Log</h2>
+        <div id="trafficTableContent">
+            <div class="no-data">Loading traffic data...</div>
+        </div>
+    </div>
+
+    <script>
+        let isLiveUpdating = true;
+        let eventSource = null;
+        let autoScroll = true;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadRecentTraffic();
+            loadStatistics();
+            startLiveUpdates();
+            
+            // Auto-scroll checkbox
+            document.getElementById('autoScroll').addEventListener('change', (e) => {
+                autoScroll = e.target.checked;
+            });
+        });
+
+        function startLiveUpdates() {
+            if (eventSource) return;
+            
+            eventSource = new EventSource('/api/traffic/stream');
+            
+            eventSource.onmessage = function(event) {
+                if (!isLiveUpdating) return;
+                
+                const request = JSON.parse(event.data);
+                addRequestToTable(request);
+                updateStatistics();
+            };
+            
+            eventSource.onerror = function(error) {
+                console.error('SSE Error:', error);
+                setTimeout(() => {
+                    if (isLiveUpdating) {
+                        eventSource.close();
+                        eventSource = null;
+                        startLiveUpdates();
+                    }
+                }, 5000);
+            };
+        }
+
+        function toggleLiveUpdates() {
+            isLiveUpdating = !isLiveUpdating;
+            const indicator = document.getElementById('liveIndicator');
+            const button = document.getElementById('toggleLive');
+            
+            if (isLiveUpdating) {
+                indicator.classList.remove('paused');
+                button.textContent = 'Pause Live';
+                button.classList.remove('btn-success');
+                button.classList.add('btn-success');
+                if (!eventSource) startLiveUpdates();
+            } else {
+                indicator.classList.add('paused');
+                button.textContent = 'Resume Live';
+                button.classList.remove('btn-success');
+                button.classList.add('btn-secondary');
+            }
+        }
+
+        async function loadRecentTraffic() {
+            try {
+                const response = await fetch('/api/traffic/recent?limit=100');
+                const data = await response.json();
+                
+                if (data.success && data.requests.length > 0) {
+                    renderTrafficTable(data.requests);
+                } else {
+                    document.getElementById('trafficTableContent').innerHTML = 
+                        '<div class="no-data">No traffic data available yet. Start making requests to see them here.</div>';
+                }
+            } catch (error) {
+                console.error('Error loading traffic:', error);
+                document.getElementById('trafficTableContent').innerHTML = 
+                    '<div class="no-data">Error loading traffic data</div>';
+            }
+        }
+
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/api/traffic/stats');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const stats = data.stats;
+                    document.getElementById('totalRequests').textContent = stats.total_requests;
+                    document.getElementById('successRate').textContent = stats.success_rate + '%';
+                    document.getElementById('avgResponseTime').textContent = stats.avg_response_time + 's';
+                    document.getElementById('bufferUsage').textContent = 
+                        `${stats.buffer_size}/${stats.buffer_capacity}`;
+                }
+            } catch (error) {
+                console.error('Error loading statistics:', error);
+            }
+        }
+
+        function updateStatistics() {
+            loadStatistics();
+        }
+
+        function renderTrafficTable(requests) {
+            if (requests.length === 0) {
+                document.getElementById('trafficTableContent').innerHTML = 
+                    '<div class="no-data">No requests match the current filters</div>';
+                return;
+            }
+
+            let html = `
+                <table class="traffic-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Source IP</th>
+                            <th>Port</th>
+                            <th>Method</th>
+                            <th>Path</th>
+                            <th>Status</th>
+                            <th>Time</th>
+                            <th>Origin</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trafficTableBody">
+            `;
+
+            requests.forEach(req => {
+                html += createRequestRow(req);
+            });
+
+            html += '</tbody></table>';
+            document.getElementById('trafficTableContent').innerHTML = html;
+        }
+
+        function createRequestRow(req) {
+            const timestamp = new Date(req.timestamp).toLocaleString();
+            const statusClass = getStatusClass(req.status_code);
+            const ipClass = req.is_external ? 'ip-external' : 'ip-internal';
+            const originBadge = req.is_external ? 
+                '<span class="status-error">External</span>' : 
+                '<span class="status-success">Internal</span>';
+            
+            let issuesHtml = '';
+            if (req.issues && req.issues.length > 0) {
+                issuesHtml = req.issues.map(issue => 
+                    `<span class="issue-badge">${issue}</span>`
+                ).join('');
+            }
+
+            return `
+                <tr id="req-${req.id}">
+                    <td style="font-size: 0.85em;">${timestamp}</td>
+                    <td><span class="ip-badge ${ipClass}">${req.source_ip}</span></td>
+                    <td><strong>${req.port}</strong></td>
+                    <td><span class="method-badge">${req.method}</span></td>
+                    <td style="font-family: monospace; font-size: 0.9em;">${req.path}</td>
+                    <td><span class="status-badge ${statusClass}">${req.status_code}</span></td>
+                    <td>${req.response_time}s</td>
+                    <td>${originBadge}</td>
+                    <td>
+                        <button class="details-btn" onclick="toggleDetails('${req.id}')">Details</button>
+                    </td>
+                </tr>
+                <tr id="details-${req.id}" style="display: none;">
+                    <td colspan="9">
+                        <div class="request-details">
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                <div><strong>Request ID:</strong> ${req.id}</div>
+                                <div><strong>Full URL:</strong> ${req.full_url}</div>
+                                <div><strong>User Agent:</strong> ${req.user_agent}</div>
+                                <div><strong>Referer:</strong> ${req.referer || 'None'}</div>
+                                <div><strong>Host:</strong> ${req.host}</div>
+                                <div><strong>Protocol:</strong> ${req.protocol.toUpperCase()}</div>
+                                <div><strong>Query String:</strong> ${req.query_string || 'None'}</div>
+                                <div><strong>Forwarded For:</strong> ${req.forwarded_for || 'None'}</div>
+                                <div><strong>AdGuard Processed:</strong> ${req.adguard_processed ? 'Yes' : 'No'}</div>
+                                <div><strong>Content Length:</strong> ${req.content_length || 'N/A'}</div>
+                            </div>
+                            ${issuesHtml ? `<div style="margin-top: 10px;"><strong>Issues:</strong><br>${issuesHtml}</div>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        function addRequestToTable(request) {
+            const tbody = document.getElementById('trafficTableBody');
+            if (!tbody) {
+                loadRecentTraffic();
+                return;
+            }
+
+            // Check if request already exists
+            if (document.getElementById(`req-${request.id}`)) return;
+
+            const row = createRequestRow(request);
+            tbody.insertAdjacentHTML('afterbegin', row);
+
+            // Limit to 100 visible rows
+            while (tbody.children.length > 200) { // 200 because each request has 2 rows
+                tbody.removeChild(tbody.lastChild);
+                tbody.removeChild(tbody.lastChild);
+            }
+
+            // Auto-scroll
+            if (autoScroll) {
+                const container = document.querySelector('.traffic-table-container');
+                container.scrollTop = 0;
+            }
+        }
+
+        function toggleDetails(requestId) {
+            const detailsRow = document.getElementById(`details-${requestId}`);
+            const detailsDiv = detailsRow.querySelector('.request-details');
+            
+            if (detailsRow.style.display === 'none') {
+                detailsRow.style.display = 'table-row';
+                detailsDiv.classList.add('show');
+            } else {
+                detailsRow.style.display = 'none';
+                detailsDiv.classList.remove('show');
+            }
+        }
+
+        function getStatusClass(statusCode) {
+            if (statusCode >= 200 && statusCode < 300) return 'status-success';
+            if (statusCode >= 300 && statusCode < 400) return 'status-info';
+            if (statusCode >= 400 && statusCode < 500) return 'status-warning';
+            return 'status-error';
+        }
+
+        async function applyFilters() {
+            const port = document.getElementById('filterPort').value;
+            const ip = document.getElementById('filterIP').value;
+            const method = document.getElementById('filterMethod').value;
+            const status = document.getElementById('filterStatus').value;
+            const external = document.getElementById('filterExternal').checked;
+
+            const params = new URLSearchParams();
+            if (port) params.append('port', port);
+            if (ip) params.append('ip', ip);
+            if (method) params.append('method', method);
+            if (status) params.append('status', status);
+            if (external) params.append('external', 'true');
+
+            try {
+                const response = await fetch(`/api/traffic/filter?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    renderTrafficTable(data.requests);
+                }
+            } catch (error) {
+                console.error('Error applying filters:', error);
+            }
+        }
+
+        function clearFilters() {
+            document.getElementById('filterPort').value = '';
+            document.getElementById('filterIP').value = '';
+            document.getElementById('filterMethod').value = '';
+            document.getElementById('filterStatus').value = '';
+            document.getElementById('filterExternal').checked = false;
+            loadRecentTraffic();
+        }
+
+        async function exportCSV() {
+            window.location.href = '/api/traffic/export';
+        }
+
+        async function clearLogs() {
+            if (!confirm('Are you sure you want to clear all traffic logs? This cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/traffic/clear', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Traffic logs cleared successfully');
+                    loadRecentTraffic();
+                    loadStatistics();
+                }
+            } catch (error) {
+                console.error('Error clearing logs:', error);
+                alert('Error clearing logs');
+            }
+        }
+    </script>
+</body>
+</html>

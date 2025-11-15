@@ -489,6 +489,67 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        .time-range-btn {
+            padding: 8px 16px;
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            color: var(--neon-blue);
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .time-range-btn:hover {
+            background: rgba(0, 212, 255, 0.2);
+            border-color: var(--neon-blue);
+            transform: translateY(-2px);
+        }
+
+        .time-range-btn.active {
+            background: var(--neon-blue);
+            color: var(--dark-bg);
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+        }
+
+        select {
+            background: var(--dark-bg);
+            color: var(--neon-blue);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        select option {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 10px;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 5px rgba(0, 212, 255, 0.5);
+        }
+
+        input[type="text"] {
+            background: var(--dark-bg);
+            color: var(--neon-blue);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 5px rgba(0, 212, 255, 0.5);
+        }
     </style>
 </head>
 <body>
@@ -499,9 +560,18 @@
                 <p>Advanced Network Monitoring & Diagnostics</p>
             </div>
             <div class="user-controls">
+                <div style="text-align: right; margin-bottom: 8px;">
+                    <div id="currentTime" style="font-size: 18px; font-weight: bold; color: var(--neon-blue);">--:--:--</div>
+                    <div style="font-size: 11px; color: #888;" id="currentDate">Loading...</div>
+                </div>
                 <span>Welcome, <strong>{{ current_user.username }}</strong></span>
                 <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
             </div>
+        </div>
+        
+        <!-- Clock drift warning banner -->
+        <div id="clockDriftBanner" style="display: none; background: linear-gradient(135deg, #ff6b6b, #ee5a6f); color: white; padding: 12px 20px; text-align: center; font-weight: bold; border-bottom: 2px solid #ff3838; box-shadow: 0 2px 8px rgba(255,0,0,0.3);">
+            ⚠️ <span id="clockDriftMessage"></span>
         </div>
 
         <div class="tabs">
@@ -516,6 +586,7 @@
             <button class="tab-btn" onclick="switchTab('smart')">✨ Smart</button>
             <button class="tab-btn" onclick="switchTab('terminal')">💻 Terminal</button>
             <button class="tab-btn" onclick="switchTab('analytics')">📈 Analytics</button>
+            <button class="tab-btn" onclick="window.location.href='/traffic-monitor'">🚦 Traffic Monitor</button>
         </div>
 
         <!-- Overview Tab -->
@@ -609,6 +680,34 @@
                         <span class="stat-value" id="packetsRecv">-</span>
                     </div>
                 </div>
+
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>🚦 Top Bandwidth Devices (Last 24h)</h3>
+                    <div id="topBandwidthDevices">
+                        <p style="color:#888; text-align:center;">Fetching real data from router...</p>
+                    </div>
+                    <div class="refresh-info">Requires router SSH with nlbwmon; set `ROUTER_IP`, `ROUTER_USER`, `ROUTER_PASS`. Falls back to local process stats.</div>
+                    <button class="diagnostic-btn" onclick="refreshTopBandwidthDevices()" style="width: 100%; margin-top: 10px;">Refresh</button>
+                </div>
+                
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>🔓 Open Ports Scanner</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px;">
+                        <div>
+                            <h4 style="color: var(--neon-blue); margin: 0 0 10px 0;">🖥️ Host (192.168.8.176)</h4>
+                            <div id="hostOpenPorts" style="min-height: 60px; padding: 10px; background: rgba(0,212,255,0.05); border-radius: 5px; border: 1px solid rgba(0,212,255,0.2);">
+                                <p style="color:#888; text-align:center; margin:0;">Click Scan to check...</p>
+                            </div>
+                        </div>
+                        <div>
+                            <h4 style="color: var(--neon-green); margin: 0 0 10px 0;">🌐 Router</h4>
+                            <div id="routerOpenPorts" style="min-height: 60px; padding: 10px; background: rgba(0,255,65,0.05); border-radius: 5px; border: 1px solid rgba(0,255,65,0.2);">
+                                <p style="color:#888; text-align:center; margin:0;">Click Scan to check...</p>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="diagnostic-btn" onclick="scanOpenPorts()" style="width: 100%;">🔍 Scan Open Ports</button>
+                </div>
             </div>
         </div>
 
@@ -628,6 +727,19 @@
 
         <!-- Performance Tab -->
         <div id="performance" class="tab-content">
+            <div class="card" style="grid-column: 1 / -1; margin-bottom: 20px;">
+                <h3>⏱️ Time Range</h3>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <button class="time-range-btn active" data-hours="1" onclick="changeTimeRange(1)">1 Hour</button>
+                    <button class="time-range-btn" data-hours="6" onclick="changeTimeRange(6)">6 Hours</button>
+                    <button class="time-range-btn" data-hours="24" onclick="changeTimeRange(24)">24 Hours</button>
+                    <button class="time-range-btn" data-hours="72" onclick="changeTimeRange(72)">3 Days</button>
+                    <button class="time-range-btn" data-hours="168" onclick="changeTimeRange(168)">7 Days</button>
+                    <button class="diagnostic-btn" onclick="refreshPerformanceTrends()" style="margin-left: auto;">
+                        <span style="font-size: 16px;">🔄</span> Refresh
+                    </button>
+                </div>
+            </div>
             <div class="grid">
                 <div class="card" style="grid-column: 1 / -1;">
                     <h3>📊 CPU Usage History</h3>
@@ -824,16 +936,7 @@
                 </div>
             </div>
 
-            <div class="grid" style="margin-top: 20px;">
-                <div class="card" style="grid-column: 1 / -1;">
-                    <h3>🗺️ Traceroute Analysis</h3>
-                    <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
-                        <input type="text" id="traceTarget" placeholder="Target (google.com)" value="google.com" style="flex: 1; padding: 10px; background: rgba(0, 212, 255, 0.1); border: 2px solid var(--neon-blue); border-radius: 5px; color: white;">
-                        <button class="diagnostic-btn" onclick="runTraceroute()" style="padding: 10px 20px;">Run Trace</button>
-                    </div>
-                    <div class="diagnostic-output" id="traceOutput"></div>
-                </div>
-            </div>
+            <!-- Traceroute module removed per requirements -->
 
             <div class="grid" style="margin-top: 20px;">
                 <div class="card" style="grid-column: 1 / -1;">
@@ -968,6 +1071,23 @@
 
     <script>
         let cpuChart, memChart, trafficChart, performanceTrendChart;
+        let currentTimeRangeHours = 1; // Default to 1 hour
+
+        // Change time range for performance charts
+        function changeTimeRange(hours) {
+            currentTimeRangeHours = hours;
+            
+            // Update button states
+            document.querySelectorAll('.time-range-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (parseInt(btn.getAttribute('data-hours')) === hours) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            // Refresh charts with new time range
+            refreshPerformanceTrends();
+        }
 
         // Tab switching
         function switchTab(tabName) {
@@ -987,8 +1107,10 @@
             // Initialize charts when switching to performance tab
             if (tabName === 'performance') {
                 initializeCharts();
+                refreshPerformanceTrends();
             } else if (tabName === 'network') {
                 refreshSpeedTestHistory();
+                syncServerTime();
             } else if (tabName === 'smart') {
                 refreshDeviceTags();
                 refreshBandwidthQuotas();
@@ -1000,6 +1122,7 @@
                 initializePerformanceTrendChart();
                 refreshUptimeStats();
                 refreshPerformanceTrends();
+                syncServerTime();
             }
         }
 
@@ -1021,6 +1144,89 @@
                 }
             } catch (error) {
                 console.error('Error:', error);
+            }
+        }
+
+        async function refreshTopBandwidthDevices() {
+            try {
+                const res = await fetch('/api/top-bandwidth-devices?hours=24');
+                const data = await res.json();
+                const list = data.devices || [];
+                if (!list.length) {
+                    document.getElementById('topBandwidthDevices').innerHTML = '<p style="color:#888; text-align:center;">Not available. Ensure router SSH and nlbwmon are enabled.</p>';
+                    return;
+                }
+                const rows = list.slice(0, 10).map((d, i) => {
+                    const total = (d.bytes_sent + d.bytes_recv) / (1024*1024);
+                    const sent = d.bytes_sent / (1024*1024);
+                    const recv = d.bytes_recv / (1024*1024);
+                    // Display MAC/IP or process name
+                    const identifier = d.mac || d.ip || d.name || 'Unknown';
+                    return `
+                        <div class="device-item" style="border-left-color: var(--neon-blue); display:flex; justify-content: space-between; align-items:center;">
+                            <div>
+                                <div><strong>#${i+1}</strong> ${identifier}</div>
+                                <div style="font-size:12px; color:#a0a0a0;">Sent: ${sent.toFixed(2)} MB | Recv: ${recv.toFixed(2)} MB</div>
+                            </div>
+                            <div style="font-weight:bold; color: var(--neon-green);">${total.toFixed(2)} MB</div>
+                        </div>`;
+                }).join('');
+                document.getElementById('topBandwidthDevices').innerHTML = rows;
+            } catch (e) {
+                document.getElementById('topBandwidthDevices').innerHTML = '<p style="color:#f66; text-align:center;">Error loading bandwidth data</p>';
+            }
+        }
+
+        // Port Scanner
+        async function scanOpenPorts() {
+            const hostDiv = document.getElementById('hostOpenPorts');
+            const routerDiv = document.getElementById('routerOpenPorts');
+            
+            hostDiv.innerHTML = '<p style="color:#888; text-align:center; margin:0;">Scanning...</p>';
+            routerDiv.innerHTML = '<p style="color:#888; text-align:center; margin:0;">Scanning...</p>';
+            
+            try {
+                const res = await fetch('/api/open-ports?host=192.168.8.176');
+                const data = await res.json();
+                
+                const hostPorts = data.host.ports.length > 0 
+                    ? data.host.ports.map(p => `<span style="display:inline-block; margin:3px; padding:5px 10px; background:rgba(0,212,255,0.2); border:1px solid var(--neon-blue); border-radius:4px; font-family:monospace;">${p}</span>`).join('')
+                    : '<p style="color:#888; margin:0;">No open ports found</p>';
+                
+                const routerPorts = data.router.ports.length > 0
+                    ? data.router.ports.map(p => `<span style="display:inline-block; margin:3px; padding:5px 10px; background:rgba(0,255,65,0.2); border:1px solid var(--neon-green); border-radius:4px; font-family:monospace;">${p}</span>`).join('')
+                    : '<p style="color:#888; margin:0;">No open ports found</p>';
+                
+                hostDiv.innerHTML = hostPorts;
+                routerDiv.innerHTML = routerPorts;
+            } catch (e) {
+                hostDiv.innerHTML = '<p style="color:#f66; margin:0;">Scan failed</p>';
+                routerDiv.innerHTML = '<p style="color:#f66; margin:0;">Scan failed</p>';
+            }
+        }
+
+        // Live Clock Update
+        function updateClock() {
+            const now = new Date();
+            const timeEl = document.getElementById('currentTime');
+            const dateEl = document.getElementById('currentDate');
+            if (timeEl) timeEl.textContent = now.toLocaleTimeString();
+            if (dateEl) dateEl.textContent = now.toLocaleDateString();
+        }
+
+        // Clock Drift Detection
+        async function checkClockDrift() {
+            await syncServerTime();
+            const driftMinutes = Math.abs(serverTimeOffsetMs / 60000);
+            const banner = document.getElementById('clockDriftBanner');
+            const message = document.getElementById('clockDriftMessage');
+
+            // Show only if true drift exceeds 2 minutes
+            if (driftMinutes > 2) {
+                if (banner) banner.style.display = 'block';
+                if (message) message.textContent = `Clock drift (>2m): ${driftMinutes.toFixed(1)} minutes. Times use browser local zone.`;
+            } else {
+                if (banner) banner.style.display = 'none';
             }
         }
 
@@ -1215,6 +1421,14 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ type, target })
                 });
+                
+                // Check if response is HTML (redirect to login)
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('text/html')) {
+                    output.textContent = 'Session expired. Please refresh the page and log in again.';
+                    return;
+                }
+                
                 const data = await response.json();
                 output.textContent = data.result || 'No output';
             } catch (error) {
@@ -1260,15 +1474,30 @@
                     html = '<p style="color: #888; text-align: center;">No services found</p>';
                 } else {
                     data.services.forEach(service => {
-                        const statusColor = service.status === 'running' ? 'var(--neon-green)' : 'var(--danger)';
+                        const statusColor = service.status === 'RUNNING' ? 'var(--neon-green)' : 'var(--danger)';
                         html += `
                             <div class="device-item" style="border-left-color: ${statusColor}">
-                                <div style="display: flex; justify-content: space-between;">
-                                    <span><strong>${service.name}</strong> - ${service.status.toUpperCase()}</span>
-                                </div>
-                                <div style="font-size: 12px; color: #a0a0a0; margin-top: 5px;">
-                                    Memory: ${service.memory_mb ? service.memory_mb.toFixed(2) + ' MB' : 'N/A'} | 
-                                    CPU: ${service.cpu_percent ? service.cpu_percent.toFixed(1) + '%' : 'N/A'}
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div><strong>${service.name}</strong> - ${service.status}</div>
+                                        <div style="font-size: 12px; color: #a0a0a0; margin-top: 5px;">
+                                            Uptime: ${service.uptime || 'N/A'} | 
+                                            CPU: ${service.cpu_percent ? service.cpu_percent + '%' : 'N/A'} | 
+                                            RAM: ${service.memory_mb ? service.memory_mb + ' MB' : 'N/A'}
+                                        </div>
+                                    </div>
+                                    ${service.can_control ? `
+                                        <div style="display: flex; gap: 10px;">
+                                            <button class="diagnostic-btn" onclick="controlService(${service.pid}, '${service.name}', 'stop')" 
+                                                    style="padding: 5px 15px; font-size: 12px; background: var(--danger);">
+                                                Stop
+                                            </button>
+                                            <button class="diagnostic-btn" onclick="controlService(${service.pid}, '${service.name}', 'restart')" 
+                                                    style="padding: 5px 15px; font-size: 12px;">
+                                                Restart
+                                            </button>
+                                        </div>
+                                    ` : ''}
                                 </div>
                             </div>
                         `;
@@ -1281,8 +1510,59 @@
                 document.getElementById('servicesList').innerHTML = '<p style="color: var(--danger);">Error loading services</p>';
             }
         }
+        
+        async function controlService(pid, serviceName, action) {
+            if (!confirm(`Are you sure you want to ${action} ${serviceName}?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/service-control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        pid: pid,
+                        service_name: serviceName,
+                        action: action
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message || `Service ${action} successful`);
+                    // Refresh services list after a short delay
+                    setTimeout(refreshServices, 1000);
+                } else {
+                    alert(`Error: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert(`Error controlling service: ${error.message}`);
+            }
+        }
 
         // System Logs (Module 3)
+        // Time sync
+        let serverTimeOffsetMs = 0; // positive if server is ahead of browser
+        async function syncServerTime() {
+            try {
+                const res = await fetch('/api/server-time');
+                if (!res.ok) return;
+                const data = await res.json();
+                const serverUtcMs = data.server_utc_ms;
+                const clientUtcMs = Date.now();
+                serverTimeOffsetMs = serverUtcMs - clientUtcMs;
+            } catch (_) { /* ignore */ }
+        }
+
+        function formatServerTime(tsIso) {
+            // Always display in browser local time, do not apply server offset
+            return new Date(tsIso).toLocaleString();
+        }
+
         async function refreshSystemLogs() {
             try {
                 const logType = document.getElementById('logFilter').value;
@@ -1306,7 +1586,7 @@
                         
                         html += `
                             <div class="log-entry ${log.level.toLowerCase()}">
-                                <div class="log-time">${new Date(log.timestamp).toLocaleString()}</div>
+                                <div class="log-time">${formatServerTime(log.timestamp)}</div>
                                 <div class="log-event" style="color: ${levelColor};">[${log.log_type.toUpperCase()}] ${log.component}</div>
                                 <div class="log-message">${log.message}</div>
                             </div>
@@ -1343,20 +1623,106 @@
         // Performance Trends (Module 4)
         async function refreshPerformanceTrends() {
             try {
-                const response = await fetch('/api/performance-trends?days=7');
+                // Calculate days from hours
+                const days = currentTimeRangeHours / 24;
+                const response = await fetch(`/api/performance-trends?days=${days}`);
+                if (!response.ok) {
+                    console.error('Failed to fetch performance trends:', response.status);
+                    return;
+                }
                 const data = await response.json();
                 
-                document.getElementById('cpuTrendAvg').textContent = data.cpu_avg.toFixed(1) + '%';
-                document.getElementById('cpuTrendRange').textContent = data.cpu_min.toFixed(1) + '% - ' + data.cpu_max.toFixed(1) + '%';
-                document.getElementById('memTrendAvg').textContent = data.memory_avg.toFixed(1) + '%';
-                document.getElementById('memTrendRange').textContent = data.memory_min.toFixed(1) + '% - ' + data.memory_max.toFixed(1) + '%';
+                // Set default values if data is empty
+                const cpuAvg = data.cpu_avg || 0;
+                const cpuMin = data.cpu_min || 0;
+                const cpuMax = data.cpu_max || 0;
+                const memAvg = data.memory_avg || 0;
+                const memMin = data.memory_min || 0;
+                const memMax = data.memory_max || 0;
                 
+                // Update UI with safe defaults
+                const cpuTrendAvgEl = document.getElementById('cpuTrendAvg');
+                const cpuTrendRangeEl = document.getElementById('cpuTrendRange');
+                const memTrendAvgEl = document.getElementById('memTrendAvg');
+                const memTrendRangeEl = document.getElementById('memTrendRange');
+                
+                if (cpuTrendAvgEl) cpuTrendAvgEl.textContent = cpuAvg.toFixed(1) + '%';
+                if (cpuTrendRangeEl) cpuTrendRangeEl.textContent = cpuMin.toFixed(1) + '% - ' + cpuMax.toFixed(1) + '%';
+                if (memTrendAvgEl) memTrendAvgEl.textContent = memAvg.toFixed(1) + '%';
+                if (memTrendRangeEl) memTrendRangeEl.textContent = memMin.toFixed(1) + '% - ' + memMax.toFixed(1) + '%';
+                
+                // Update Performance tab charts (CPU and Memory history)
+                if (data.snapshots && data.snapshots.length > 0 && cpuChart && memChart) {
+                    // Format timestamps based on time range
+                    const timestamps = data.snapshots.map(s => {
+                        const date = new Date(s.timestamp);
+                        if (currentTimeRangeHours <= 6) {
+                            // For short ranges, show time only (local)
+                            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        } else if (currentTimeRangeHours <= 24) {
+                            // For 1 day, show time with AM/PM (local)
+                            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        } else {
+                            // For longer ranges, show date and time (local)
+                            return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        }
+                    });
+                    
+                    const cpuData = data.snapshots.map(s => s.cpu_avg);
+                    const memData = data.snapshots.map(s => s.memory_avg);
+                    
+                    // Reduce data points if too many (show every Nth point for performance)
+                    let step = 1;
+                    if (data.snapshots.length > 100) {
+                        step = Math.ceil(data.snapshots.length / 100);
+                    }
+                    
+                    const reducedTimestamps = timestamps.filter((_, i) => i % step === 0);
+                    const reducedCpuData = cpuData.filter((_, i) => i % step === 0);
+                    const reducedMemData = memData.filter((_, i) => i % step === 0);
+                    
+                    cpuChart.data.labels = reducedTimestamps;
+                    cpuChart.data.datasets[0].data = reducedCpuData;
+                    cpuChart.update();
+                    
+                    memChart.data.labels = reducedTimestamps;
+                    memChart.data.datasets[0].data = reducedMemData;
+                    memChart.update();
+                }
+                
+                // Update Network Traffic chart using deltas from snapshots (bytes -> MB)
+                if (data.snapshots && data.snapshots.length > 1 && trafficChart) {
+                    const toMB = (bytes) => Math.max(0, (bytes || 0) / (1024 * 1024));
+                    const labels = [];
+                    const sent = [];
+                    const recv = [];
+                    for (let i = 1; i < data.snapshots.length; i++) {
+                        const prev = data.snapshots[i - 1];
+                        const curr = data.snapshots[i];
+                        const dt = new Date(curr.timestamp);
+                        labels.push(dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+                        sent.push(toMB((curr.network_bytes_sent || 0) - (prev.network_bytes_sent || 0)));
+                        recv.push(toMB((curr.network_bytes_recv || 0) - (prev.network_bytes_recv || 0)));
+                    }
+                    // Reduce points if > 100
+                    let step = 1;
+                    if (labels.length > 100) step = Math.ceil(labels.length / 100);
+                    const rLabels = labels.filter((_, i) => i % step === 0);
+                    const rSent = sent.filter((_, i) => i % step === 0);
+                    const rRecv = recv.filter((_, i) => i % step === 0);
+
+                    trafficChart.data.labels = rLabels;
+                    trafficChart.data.datasets[0].data = rSent;
+                    trafficChart.data.datasets[1].data = rRecv;
+                    trafficChart.update();
+                }
+
                 // Update performance trend chart if visible
-                if (document.getElementById('analytics').classList.contains('active')) {
-                    updatePerformanceTrendChart(data.snapshots);
+                if (document.getElementById('analytics') && document.getElementById('analytics').classList.contains('active')) {
+                    updatePerformanceTrendChart(data.snapshots || []);
                 }
             } catch (error) {
-                console.error('Error:', error);
+                console.error('Error refreshing performance trends:', error);
             }
         }
 
@@ -1373,7 +1739,7 @@
                 document.getElementById('speedDown').textContent = data.download_speed.toFixed(2) + ' Mbps';
                 document.getElementById('speedUp').textContent = data.upload_speed.toFixed(2) + ' Mbps';
                 document.getElementById('speedPing').textContent = data.ping.toFixed(2) + ' ms';
-                document.getElementById('speedTime').textContent = new Date(data.timestamp).toLocaleString();
+                document.getElementById('speedTime').textContent = formatServerTime(data.timestamp);
                 
                 btn.disabled = false;
                 btn.textContent = 'Run Speedtest';
@@ -1410,7 +1776,7 @@
                 document.getElementById('dnsStatus').textContent = data.leaked ? '⚠️ LEAKED' : '✓ SECURE';
                 document.getElementById('dnsStatus').style.color = data.leaked ? 'var(--danger)' : 'var(--neon-green)';
                 document.getElementById('dnsServersCount').textContent = data.dns_servers.length;
-                document.getElementById('dnsTime').textContent = new Date(data.timestamp).toLocaleString();
+                document.getElementById('dnsTime').textContent = formatServerTime(data.timestamp);
                 
                 let serversList = '';
                 data.dns_servers.forEach(server => {
@@ -1427,49 +1793,23 @@
             }
         }
 
-        async function runTraceroute() {
-            try {
-                const target = document.getElementById('traceTarget').value || 'google.com';
-                const output = document.getElementById('traceOutput');
-                
-                output.textContent = 'Running traceroute to ' + target + '...';
-                output.style.display = 'block';
-                
-                const response = await fetch('/api/traceroute', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target })
-                });
-                const data = await response.json();
-                
-                let text = `Target: ${data.target}\nHops: ${data.hops}\n\n`;
-                if (data.path && Array.isArray(data.path)) {
-                    data.path.forEach((hop, i) => {
-                        text += `${i + 1}. ${hop}\n`;
-                    });
-                } else {
-                    text += 'No path data available';
-                }
-                output.textContent = text;
-            } catch (error) {
-                document.getElementById('traceOutput').textContent = 'Error: ' + error.message;
-            }
-        }
+        // Traceroute removed per requirements
 
         function updateSpeedTestChart(results) {
             if (!document.getElementById('speedTestChart')) return;
             
             const ctx = document.getElementById('speedTestChart').getContext('2d');
             
-            if (window.speedTestChart) {
-                window.speedTestChart.destroy();
+            // Use a distinct global to avoid clashing with element id
+            if (window.speedTestChartInstance && typeof window.speedTestChartInstance.destroy === 'function') {
+                window.speedTestChartInstance.destroy();
             }
             
             const labels = results.map(r => new Date(r.timestamp).toLocaleString());
             const downloads = results.map(r => r.download_speed);
             const uploads = results.map(r => r.upload_speed);
             
-            window.speedTestChart = new Chart(ctx, {
+            window.speedTestChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
@@ -1676,7 +2016,7 @@
                         html += `
                             <div class="device-item" style="border-left-color: var(--neon-blue);">
                                 <div style="font-family: monospace; color: var(--neon-green);">$ ${cmd.command}</div>
-                                <div style="color: #888; font-size: 11px;">${new Date(cmd.timestamp).toLocaleString()}</div>
+                                <div style="color: #888; font-size: 11px;">${formatServerTime(cmd.timestamp)}</div>
                             </div>
                         `;
                     });
@@ -1847,7 +2187,7 @@
             
             const ctx = document.getElementById('trafficChart').getContext('2d');
             trafficChart = new Chart(ctx, {
-                type: 'area',
+                type: 'line',
                 data: {
                     labels: ['Now'],
                     datasets: [{
@@ -1855,12 +2195,14 @@
                         data: [0],
                         borderColor: '#00d4ff',
                         backgroundColor: 'rgba(0, 212, 255, 0.2)',
+                        fill: true,
                         tension: 0.4
                     }, {
                         label: 'Data Received (MB)',
                         data: [0],
                         borderColor: '#00ff41',
                         backgroundColor: 'rgba(0, 255, 65, 0.2)',
+                        fill: true,
                         tension: 0.4
                     }]
                 },
@@ -2124,6 +2466,15 @@
             refreshBandwidthQuotas();
             refreshAutoAlerts();
             refreshCommandHistory();
+            refreshTopBandwidthDevices();
+            syncServerTime().then(checkClockDrift);
+            
+            // Initialize live clock
+            updateClock();
+            setInterval(updateClock, 1000);
+            
+            // Recheck clock drift periodically
+            setInterval(() => syncServerTime().then(checkClockDrift), 300000); // Every 5 minutes
         });
     </script>
 
