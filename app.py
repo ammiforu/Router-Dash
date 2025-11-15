@@ -168,7 +168,7 @@ def is_external_ip(ip: str) -> bool:
 
 # ----- AdGuard Home API helpers -----
 def get_adguard_logs(limit=100):
-    """Fetch DNS query logs from AdGuard Home API."""
+    """Fetch DNS query logs from AdGuard Home API using session-based authentication."""
     try:
         adguard_url = os.environ.get('ADGUARD_URL', 'http://192.168.8.1:3000')
         username = os.environ.get('ADGUARD_USERNAME', 'admin')
@@ -178,19 +178,29 @@ def get_adguard_logs(limit=100):
             logger.warning("AdGuard password not configured in .env")
             return []
         
-        # AdGuard Home API endpoint for query logs
+        # Create session for cookies
+        session = requests.Session()
+        
+        # First, authenticate to get session cookie
+        login_url = f"{adguard_url}/control/login"
+        login_response = session.post(
+            login_url,
+            json={"name": username, "password": password},
+            timeout=5
+        )
+        
+        if login_response.status_code != 200:
+            logger.error(f"AdGuard authentication failed: {login_response.status_code} - {login_response.text}")
+            return []
+        
+        # Now fetch query logs using the authenticated session
         url = f"{adguard_url}/control/querylog"
         params = {
             'older_than': '',  # Empty for most recent
             'limit': limit
         }
         
-        response = requests.get(
-            url,
-            params=params,
-            auth=HTTPBasicAuth(username, password),
-            timeout=5
-        )
+        response = session.get(url, params=params, timeout=5)
         
         if response.status_code == 200:
             data = response.json()
@@ -219,9 +229,10 @@ def get_adguard_logs(limit=100):
                 }
                 logs.append(log_entry)
             
+            logger.info(f"Successfully fetched {len(logs)} AdGuard DNS queries")
             return logs
         else:
-            logger.error(f"AdGuard API error: {response.status_code}")
+            logger.error(f"AdGuard querylog API error: {response.status_code} - {response.text[:200]}")
             return []
             
     except requests.exceptions.RequestException as e:
@@ -2939,7 +2950,7 @@ def clear_traffic():
         request_stats['by_status'].clear()
         request_stats['by_ip'].clear()
     
-    log_system_event(current_user.username, 'traffic_logs_cleared', 'Traffic logs cleared by user')
+    add_system_log('security', 'info', 'traffic_monitor', f'Traffic logs cleared by {current_user.username}')
     
     return jsonify({'success': True, 'message': 'Traffic logs cleared'})
 
