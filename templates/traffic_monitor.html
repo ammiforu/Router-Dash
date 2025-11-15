@@ -451,6 +451,15 @@
             </label>
         </div>
         
+        <div class="control-group">
+            <label for="filterTrafficType">Traffic Type:</label>
+            <select id="filterTrafficType">
+                <option value="all">All Traffic</option>
+                <option value="app_request">App Requests</option>
+                <option value="dns_query">DNS Queries</option>
+            </select>
+        </div>
+        
         <button class="btn" onclick="applyFilters()">🔍 Apply Filters</button>
         <button class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
         <button class="btn btn-success" onclick="exportCSV()">📥 Export CSV</button>
@@ -534,7 +543,7 @@
 
         async function loadRecentTraffic() {
             try {
-                const response = await fetch('/api/traffic/recent?limit=100');
+                const response = await fetch('/api/traffic/combined?limit=200&dns=true');
                 const data = await response.json();
                 
                 if (data.success && data.requests.length > 0) {
@@ -584,10 +593,10 @@
                     <thead>
                         <tr>
                             <th>Timestamp</th>
+                            <th>Type</th>
                             <th>Source IP</th>
-                            <th>Port</th>
-                            <th>Method</th>
-                            <th>Path</th>
+                            <th>Method/Type</th>
+                            <th>Path/Domain</th>
                             <th>Status</th>
                             <th>Time</th>
                             <th>Origin</th>
@@ -607,11 +616,31 @@
 
         function createRequestRow(req) {
             const timestamp = new Date(req.timestamp).toLocaleString();
-            const statusClass = getStatusClass(req.status_code);
+            const isDnsQuery = req.type === 'dns_query';
+            
+            // Type badge
+            const typeBadge = isDnsQuery ? 
+                '<span class="status-info" style="font-size: 0.8em;">DNS</span>' : 
+                '<span class="status-success" style="font-size: 0.8em;">APP</span>';
+            
+            const statusClass = isDnsQuery ? 
+                (req.blocked ? 'status-error' : 'status-success') : 
+                getStatusClass(req.status_code);
+            
             const ipClass = req.is_external ? 'ip-external' : 'ip-internal';
             const originBadge = req.is_external ? 
                 '<span class="status-error">External</span>' : 
                 '<span class="status-success">Internal</span>';
+            
+            // Status display
+            const statusDisplay = isDnsQuery ? 
+                `<span class="status-badge ${statusClass}">${req.blocked ? 'BLOCKED' : req.status_text || 'OK'}</span>` :
+                `<span class="status-badge ${statusClass}">${req.status_code}</span>`;
+            
+            // Method/Type display
+            const methodDisplay = isDnsQuery ? 
+                `<span class="method-badge" style="color: #00d4ff;">${req.method}</span>` :
+                `<span class="method-badge">${req.method}</span>`;
             
             let issuesHtml = '';
             if (req.issues && req.issues.length > 0) {
@@ -619,15 +648,20 @@
                     `<span class="issue-badge">${issue}</span>`
                 ).join('');
             }
+            
+            // Special display for blocked DNS queries
+            if (isDnsQuery && req.blocked) {
+                issuesHtml += `<span class="issue-badge" style="background: rgba(255,107,107,0.3);">${req.reason}</span>`;
+            }
 
             return `
                 <tr id="req-${req.id}">
                     <td style="font-size: 0.85em;">${timestamp}</td>
+                    <td>${typeBadge}</td>
                     <td><span class="ip-badge ${ipClass}">${req.source_ip}</span></td>
-                    <td><strong>${req.port}</strong></td>
-                    <td><span class="method-badge">${req.method}</span></td>
+                    <td>${methodDisplay}</td>
                     <td style="font-family: monospace; font-size: 0.9em;">${req.path}</td>
-                    <td><span class="status-badge ${statusClass}">${req.status_code}</span></td>
+                    <td>${statusDisplay}</td>
                     <td>${req.response_time}s</td>
                     <td>${originBadge}</td>
                     <td>
@@ -637,18 +671,31 @@
                 <tr id="details-${req.id}" style="display: none;">
                     <td colspan="9">
                         <div class="request-details">
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                                <div><strong>Request ID:</strong> ${req.id}</div>
-                                <div><strong>Full URL:</strong> ${req.full_url}</div>
-                                <div><strong>User Agent:</strong> ${req.user_agent}</div>
-                                <div><strong>Referer:</strong> ${req.referer || 'None'}</div>
-                                <div><strong>Host:</strong> ${req.host}</div>
-                                <div><strong>Protocol:</strong> ${req.protocol.toUpperCase()}</div>
-                                <div><strong>Query String:</strong> ${req.query_string || 'None'}</div>
-                                <div><strong>Forwarded For:</strong> ${req.forwarded_for || 'None'}</div>
-                                <div><strong>AdGuard Processed:</strong> ${req.adguard_processed ? 'Yes' : 'No'}</div>
-                                <div><strong>Content Length:</strong> ${req.content_length || 'N/A'}</div>
-                            </div>
+                            ${isDnsQuery ? `
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                    <div><strong>Query Type:</strong> ${req.method}</div>
+                                    <div><strong>Domain:</strong> ${req.path}</div>
+                                    <div><strong>Status:</strong> ${req.status_text || 'OK'}</div>
+                                    <div><strong>Blocked:</strong> ${req.blocked ? 'Yes' : 'No'}</div>
+                                    ${req.reason ? `<div><strong>Reason:</strong> ${req.reason}</div>` : ''}
+                                    <div><strong>Client Protocol:</strong> ${req.client_proto || 'plain'}</div>
+                                    ${req.upstream ? `<div><strong>Upstream:</strong> ${req.upstream}</div>` : ''}
+                                    <div><strong>DNSSEC:</strong> ${req.answer_dnssec ? 'Yes' : 'No'}</div>
+                                    ${req.answer && req.answer.length ? `<div style="grid-column: span 2;"><strong>Answer:</strong><br>${req.answer.map(a => a.value || a).join('<br>')}</div>` : ''}
+                                </div>
+                            ` : `
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                    <div><strong>Request ID:</strong> ${req.id}</div>
+                                    <div><strong>Full URL:</strong> ${req.full_url || req.path}</div>
+                                    <div><strong>User Agent:</strong> ${req.user_agent || 'N/A'}</div>
+                                    <div><strong>Referer:</strong> ${req.referer || 'None'}</div>
+                                    <div><strong>Host:</strong> ${req.host || 'N/A'}</div>
+                                    <div><strong>Protocol:</strong> ${req.protocol ? req.protocol.toUpperCase() : 'N/A'}</div>
+                                    <div><strong>Query String:</strong> ${req.query_string || 'None'}</div>
+                                    <div><strong>Forwarded For:</strong> ${req.forwarded_for || 'None'}</div>
+                                    <div><strong>Content Length:</strong> ${req.content_length || 'N/A'}</div>
+                                </div>
+                            `}
                             ${issuesHtml ? `<div style="margin-top: 10px;"><strong>Issues:</strong><br>${issuesHtml}</div>` : ''}
                         </div>
                     </td>
@@ -708,19 +755,48 @@
             const method = document.getElementById('filterMethod').value;
             const status = document.getElementById('filterStatus').value;
             const external = document.getElementById('filterExternal').checked;
+            const trafficType = document.getElementById('filterTrafficType').value;
 
-            const params = new URLSearchParams();
-            if (port) params.append('port', port);
-            if (ip) params.append('ip', ip);
-            if (method) params.append('method', method);
-            if (status) params.append('status', status);
-            if (external) params.append('external', 'true');
-
+            // For now, do client-side filtering on combined data
             try {
-                const response = await fetch(`/api/traffic/filter?${params}`);
+                const response = await fetch('/api/traffic/combined?limit=200&dns=true');
                 const data = await response.json();
                 
                 if (data.success) {
+                    let filtered = data.requests;
+                    
+                    // Filter by traffic type
+                    if (trafficType !== 'all') {
+                        filtered = filtered.filter(req => req.type === trafficType);
+                    }
+                    
+                    // Filter by IP
+                    if (ip) {
+                        filtered = filtered.filter(req => req.source_ip.includes(ip));
+                    }
+                    
+                    // Filter by method (for app requests) or query type (for DNS)
+                    if (method) {
+                        filtered = filtered.filter(req => req.method === method);
+                    }
+                    
+                    // Filter by status
+                    if (status) {
+                        filtered = filtered.filter(req => {
+                            if (req.type === 'dns_query') {
+                                return status === '2' ? !req.blocked : req.blocked;
+                            } else {
+                                return String(req.status_code).startsWith(status);
+                            }
+                        });
+                    }
+                    
+                    // Filter by external
+                    if (external) {
+                        filtered = filtered.filter(req => req.is_external);
+                    }
+                    
+                    renderTrafficTable(filtered);
                     renderTrafficTable(data.requests);
                 }
             } catch (error) {

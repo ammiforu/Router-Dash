@@ -23,6 +23,8 @@ import csv
 import io
 from collections import defaultdict, deque
 import ipaddress
+import requests
+from requests.auth import HTTPBasicAuth
 
 # ...existing code...
 
@@ -163,6 +165,72 @@ def is_external_ip(ip: str) -> bool:
         # Fallback heuristic if parsing fails
         local_ranges = ['192.168.', '10.', '172.16.', '127.', 'localhost', '::1']
         return not any(ip.startswith(prefix) for prefix in local_ranges)
+
+# ----- AdGuard Home API helpers -----
+def get_adguard_logs(limit=100):
+    """Fetch DNS query logs from AdGuard Home API."""
+    try:
+        adguard_url = os.environ.get('ADGUARD_URL', 'http://192.168.8.1:3000')
+        username = os.environ.get('ADGUARD_USERNAME', 'admin')
+        password = os.environ.get('ADGUARD_PASSWORD', '')
+        
+        if not password:
+            logger.warning("AdGuard password not configured in .env")
+            return []
+        
+        # AdGuard Home API endpoint for query logs
+        url = f"{adguard_url}/control/querylog"
+        params = {
+            'older_than': '',  # Empty for most recent
+            'limit': limit
+        }
+        
+        response = requests.get(
+            url,
+            params=params,
+            auth=HTTPBasicAuth(username, password),
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            logs = []
+            
+            for entry in data.get('data', []):
+                # Normalize AdGuard log entry to our format
+                log_entry = {
+                    'id': str(uuid.uuid4()),
+                    'timestamp': entry.get('time', ''),
+                    'source_ip': entry.get('client', 'unknown'),
+                    'is_external': is_external_ip(entry.get('client', '127.0.0.1')),
+                    'type': 'dns_query',  # Mark as DNS query
+                    'method': entry.get('question', {}).get('type', 'A'),  # DNS record type
+                    'path': entry.get('question', {}).get('name', ''),  # Domain queried
+                    'status_code': 200 if entry.get('status') == 'NOERROR' else 500,
+                    'status_text': entry.get('status', 'NOERROR'),
+                    'response_time': round(entry.get('elapsed_ms', 0) / 1000, 3),
+                    'blocked': entry.get('reason') in ['FilteredBlackList', 'FilteredBlockedService'],
+                    'reason': entry.get('reason', 'Processed'),
+                    'answer': entry.get('answer', []),
+                    'answer_dnssec': entry.get('answer_dnssec', False),
+                    'client_proto': entry.get('client_proto', 'plain'),
+                    'upstream': entry.get('upstream', ''),
+                    'rules': entry.get('rules', [])
+                }
+                logs.append(log_entry)
+            
+            return logs
+        else:
+            logger.error(f"AdGuard API error: {response.status_code}")
+            return []
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to fetch AdGuard logs: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Error processing AdGuard logs: {e}")
+        return []
+
 request_stats = {
     'total_requests': 0,
     'by_port': defaultdict(int),
@@ -2722,7 +2790,7 @@ def traffic_monitor():
 @app.route('/api/traffic/recent')
 @login_required
 def get_recent_traffic():
-    """Get recent traffic logs"""
+    """Get recent traffic logs (Flask app requests only)"""
     limit = request.args.get('limit', 50, type=int)
     
     with traffic_lock:
@@ -2733,6 +2801,56 @@ def get_recent_traffic():
         'success': True,
         'requests': recent,
         'total': len(request_log)
+    })
+
+@app.route('/api/traffic/combined')
+@login_required
+def get_combined_traffic():
+    """Get combined traffic logs (Flask app + AdGuard DNS queries)"""
+    limit = request.args.get('limit', 100, type=int)
+    include_dns = request.args.get('dns', 'true').lower() == 'true'
+    
+    combined = []
+    
+    # Get Flask app requests
+    with traffic_lock:
+        flask_logs = list(request_log)[-limit:]
+        for log in flask_logs:
+            log['type'] = 'app_request'  # Mark as app request
+        combined.extend(flask_logs)
+    
+    # Get AdGuard DNS queries if requested
+    if include_dns:
+        dns_logs = get_adguard_logs(limit=limit)
+        combined.extend(dns_logs)
+    
+    # Sort by timestamp (most recent first)
+    try:
+        combined.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    except Exception as e:
+        logger.warning(f"Error sorting combined logs: {e}")
+    
+    # Limit total results
+    combined = combined[:limit]
+    
+    return jsonify({
+        'success': True,
+        'requests': combined,
+        'total': len(combined),
+        'has_dns': include_dns and len(dns_logs) > 0
+    })
+
+@app.route('/api/adguard/logs')
+@login_required
+def get_adguard_logs_endpoint():
+    """Get AdGuard DNS query logs only"""
+    limit = request.args.get('limit', 100, type=int)
+    logs = get_adguard_logs(limit=limit)
+    
+    return jsonify({
+        'success': True,
+        'logs': logs,
+        'total': len(logs)
     })
 
 @app.route('/api/traffic/stats')
