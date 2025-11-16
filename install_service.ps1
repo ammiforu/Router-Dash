@@ -9,9 +9,14 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $serviceName = "RouterDashboard"
+
+[CmdletBinding()]
+param(
+    [switch]$RunAsCurrentUser
+)
 $currentPath = Get-Location
 $pythonExe = Join-Path $currentPath ".venv\Scripts\python.exe"
-$appScript = Join-Path $currentPath "app.py"
+$appScript = Join-Path $currentPath "service.py"
 
 # Check if running as administrator
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -62,6 +67,12 @@ if ($existingService) {
     Start-Sleep -Seconds 2
 }
 
+# Warn if running from OneDrive - local system account may not access OneDrive files
+if ($currentPath.Path -like '*OneDrive*') {
+    Write-Host "WARNING: Project is inside OneDrive. LocalSystem may not access OneDrive files." -ForegroundColor Yellow
+    Write-Host "If the service fails to start, either run with -RunAsCurrentUser or run migrate_to_c_drive.ps1 to move the project to C:\\Router-Dash" -ForegroundColor Yellow
+}
+
 Write-Host "Installing Router Dashboard service..." -ForegroundColor Green
 
 # Install service
@@ -79,6 +90,20 @@ Write-Host "Installing Router Dashboard service..." -ForegroundColor Green
 
 # Set environment variables
 & $nssmPath set $serviceName AppEnvironmentExtra "FLASK_ENV=production"
+
+# Optionally run service as the current logged-in user to access user folders like OneDrive.
+if ($RunAsCurrentUser) {
+    Write-Host "Configuring service to run as current user: $env:USERDOMAIN\\$env:USERNAME" -ForegroundColor Green
+    # Ask for password securely
+    $securePwd = Read-Host -Prompt "Enter password for $env:USERDOMAIN\\$env:USERNAME (won't echo)" -AsSecureString
+    $pwd = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePwd))
+    & $nssmPath set $serviceName ObjectName "$env:USERDOMAIN\$env:USERNAME"
+    try {
+        & $nssmPath set $serviceName ObjectPassword $pwd
+    } catch {
+        Write-Host "Could not set ObjectPassword through NSSM; please use the NSSM GUI or 'nssm edit $serviceName' to set account password." -ForegroundColor Yellow
+    }
+}
 
 Write-Host ""
 Write-Host "Service installed successfully!" -ForegroundColor Green
